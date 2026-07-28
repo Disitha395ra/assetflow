@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- QR labels use generated data URLs. */
+
 import {
   ArrowDownToLine,
   ArrowLeftRight,
@@ -10,10 +12,14 @@ import {
   ChevronDown,
   CircleDot,
   ClipboardCheck,
+  Copy,
   Download,
+  ExternalLink,
   FileSpreadsheet,
   History,
   LayoutDashboard,
+  LockKeyhole,
+  LogOut,
   Menu,
   Monitor,
   Package,
@@ -31,7 +37,18 @@ import {
 } from "lucide-react";
 import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
-import { firebaseReady, saveRecord, watchCollection } from "@/lib/firebase";
+import {
+  ADMIN_EMAIL,
+  firebaseReady,
+  getRequirementWindow,
+  saveRecord,
+  saveRequirementWindow,
+  signInAsAdmin,
+  signOutAdmin,
+  watchAuth,
+  watchCollection,
+  type RequirementWindowRecord,
+} from "@/lib/firebase";
 
 type AssetStatus = "Available" | "Assigned" | "In repair" | "Retired";
 type Asset = {
@@ -48,6 +65,8 @@ type Asset = {
   condition: string;
   details: string;
   updatedAt: string;
+  custodianName?: string;
+  custodianDepartment?: string;
 };
 type Employee = {
   id: string;
@@ -65,6 +84,8 @@ type Movement = {
   type: "Assigned" | "Returned" | "Repair" | "Cleared";
   date: string;
   note: string;
+  employeeName?: string;
+  department?: string;
 };
 type RequestRow = {
   id: string;
@@ -74,6 +95,9 @@ type RequestRow = {
   neededDate: string;
   reason: string;
   status: "Pending" | "Approved" | "Declined";
+  requesterName?: string;
+  requesterEmail?: string;
+  createdAt?: string;
 };
 type View =
   | "Dashboard"
@@ -160,25 +184,49 @@ export default function Home() {
   const [employees, setEmployees] = useState<Employee[]>(demoEmployees);
   const [movements, setMovements] = useState<Movement[]>(demoMovements);
   const [requests, setRequests] = useState<RequestRow[]>(demoRequests);
+  const [adminState, setAdminState] = useState<"loading" | "signed-out" | "admin" | "denied">(
+    firebaseReady ? "loading" : "admin",
+  );
+  const [signedInEmail, setSignedInEmail] = useState("");
+  const [requirementWindow, setRequirementWindow] = useState<RequirementWindowRecord>({
+    id: "requirement-window",
+    title: "August–September department requirements",
+    slug: "aug-sep-2026",
+    opensAt: "2026-07-28T08:00",
+    closesAt: "2026-08-31T17:00",
+    isOpen: true,
+    periodLabel: "August–September 2026",
+  });
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [department, setDepartment] = useState("All");
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
-  const [modal, setModal] = useState<"asset" | "employee" | "assign" | "return" | "request" | "document" | null>(null);
+  const [modal, setModal] = useState<"asset" | "employee" | "assign" | "return" | "request" | "document" | "qrBatch" | "schedule" | null>(null);
   const [documentType, setDocumentType] = useState("Asset Handover");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState("");
 
   useEffect(() => {
     if (!firebaseReady) return;
-    const cleanups = [
-      watchCollection<Asset>("assets", (rows) => rows.length && setAssets(rows)),
-      watchCollection<Employee>("employees", (rows) => rows.length && setEmployees(rows)),
-      watchCollection<Movement>("movements", (rows) => rows.length && setMovements(rows)),
-      watchCollection<RequestRow>("requirements", (rows) => rows.length && setRequests(rows)),
-    ];
-    return () => cleanups.forEach((cleanup) => cleanup());
+    return watchAuth((user) => {
+      const email = user?.email?.toLowerCase() ?? "";
+      setSignedInEmail(email);
+      if (!user) setAdminState("signed-out");
+      else setAdminState(email === ADMIN_EMAIL ? "admin" : "denied");
+    });
   }, []);
+
+  useEffect(() => {
+    if (!firebaseReady || adminState !== "admin") return;
+    const cleanups = [
+      watchCollection<Asset>("assets", setAssets),
+      watchCollection<Employee>("employees", setEmployees),
+      watchCollection<Movement>("movements", setMovements),
+      watchCollection<RequestRow>("requirements", setRequests),
+    ];
+    getRequirementWindow().then((config) => config && setRequirementWindow(config));
+    return () => cleanups.forEach((cleanup) => cleanup());
+  }, [adminState]);
 
   const employeeMap = useMemo(
     () => Object.fromEntries(employees.map((item) => [item.id, item])),
@@ -222,8 +270,22 @@ export default function Home() {
   }
 
   async function addMovement(movement: Movement) {
-    setMovements((rows) => [movement, ...rows]);
-    await saveRecord("movements", movement);
+    const employee = employeeMap[movement.employeeId];
+    const enriched = {
+      ...movement,
+      employeeName: employee?.name,
+      department: employee?.department,
+    };
+    setMovements((rows) => [enriched, ...rows]);
+    await saveRecord("movements", enriched);
+    await saveRecord(`assets/${movement.assetId}/history`, {
+      id: movement.id,
+      type: movement.type,
+      date: movement.date,
+      note: movement.note,
+      employeeName: employee?.name ?? "IT Department",
+      department: employee?.department ?? "IT Dept",
+    });
   }
 
   async function exportWorkbook() {
@@ -262,6 +324,16 @@ export default function Home() {
   function openDocument(type: string) {
     setDocumentType(type);
     setModal("document");
+  }
+
+  if (firebaseReady && adminState !== "admin") {
+    return <AdminGate state={adminState} email={signedInEmail} onSignIn={async () => {
+      try {
+        await signInAsAdmin();
+      } catch {
+        setAdminState("signed-out");
+      }
+    }} onSignOut={signOutAdmin} />;
   }
 
   return (
@@ -310,7 +382,6 @@ export default function Home() {
           {view === "Dashboard" && (
             <Dashboard
               assets={assets}
-              employees={employees}
               requests={requests}
               movements={movements}
               employeeMap={employeeMap}
@@ -332,6 +403,7 @@ export default function Home() {
               onAdd={() => setModal("asset")}
               onAsset={setSelectedAsset}
               onExport={exportWorkbook}
+              onQrBatch={() => setModal("qrBatch")}
             />
           )}
           {view === "Employees" && (
@@ -348,7 +420,7 @@ export default function Home() {
             <MovementsView movements={movements} assetMap={assetMap} employeeMap={employeeMap} onAssign={() => setModal("assign")} onReturn={() => setModal("return")} />
           )}
           {view === "Requirements" && (
-            <RequirementsView requests={requests} setRequests={setRequests} onAdd={() => setModal("request")} onExport={exportWorkbook} />
+            <RequirementsView requests={requests} setRequests={setRequests} windowConfig={requirementWindow} setWindowConfig={setRequirementWindow} onSchedule={() => setModal("schedule")} onAdd={() => setModal("request")} onExport={exportWorkbook} />
           )}
           {view === "Reports" && (
             <ReportsView assets={assets} employees={employees} requests={requests} onExport={exportWorkbook} onDocument={openDocument} />
@@ -361,10 +433,12 @@ export default function Home() {
         <Modal title={modalTitle(modal)} wide={modal === "document"} onClose={() => setModal(null)}>
           {modal === "asset" && <AssetForm onSave={async (asset) => { setAssets((rows) => [asset, ...rows]); await saveRecord("assets", asset); setModal(null); flash("Asset added to inventory"); }} />}
           {modal === "employee" && <EmployeeForm onSave={async (employee) => { setEmployees((rows) => [employee, ...rows]); await saveRecord("employees", employee); setModal(null); flash("Employee added"); }} />}
-          {modal === "assign" && <AssignForm assets={assets} employees={employees} onSave={async (assetIds, employeeId) => { for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Assigned", employeeId, updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: "Assigned", date: today(), note: "Asset issued through AssetFlow" }); } setModal(null); flash(`${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned`); }} />}
-          {modal === "return" && <ReturnForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, clearance) => { for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Available", employeeId: undefined, condition: "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: clearance ? "Cleared" : "Returned", date: today(), note: clearance ? "Returned during employee clearance" : "Returned to IT stock" }); } setModal(null); flash(clearance ? "Clearance return recorded" : "Return recorded"); }} />}
+          {modal === "assign" && <AssignForm assets={assets} employees={employees} onSave={async (assetIds, employeeId) => { const employee = employeeMap[employeeId]; for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Assigned", employeeId, custodianName: employee?.name, custodianDepartment: employee?.department, updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: "Assigned", date: today(), note: "Asset issued through AssetFlow" }); } setModal(null); flash(`${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned`); }} />}
+          {modal === "return" && <ReturnForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, clearance) => { for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Available", employeeId: undefined, custodianName: undefined, custodianDepartment: undefined, condition: "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: clearance ? "Cleared" : "Returned", date: today(), note: clearance ? "Returned during employee clearance" : "Returned to IT stock" }); } setModal(null); flash(clearance ? "Clearance return recorded" : "Return recorded"); }} />}
           {modal === "request" && <RequestForm onSave={async (request) => { setRequests((rows) => [request, ...rows]); await saveRecord("requirements", request); setModal(null); flash("Requirement submitted"); }} />}
           {modal === "document" && <PrintableDocument type={documentType} employees={employees} assets={assets} />}
+          {modal === "qrBatch" && <QrBatch assets={assets} employeeMap={employeeMap} />}
+          {modal === "schedule" && <ScheduleForm value={requirementWindow} onSave={async (next) => { setRequirementWindow(next); await saveRequirementWindow(next); setModal(null); flash(next.isOpen ? "Requirement form opened" : "Requirement form closed"); }} />}
         </Modal>
       )}
       {toast && <div className="toast"><Check size={17} />{toast}</div>}
@@ -372,8 +446,8 @@ export default function Home() {
   );
 }
 
-function Dashboard({ assets, employees, requests, movements, employeeMap, assetMap, onView, onAddAsset, onAssign, onReturn, onRequest, onAsset }: {
-  assets: Asset[]; employees: Employee[]; requests: RequestRow[]; movements: Movement[]; employeeMap: Record<string, Employee>; assetMap: Record<string, Asset>; onView: (view: View) => void; onAddAsset: () => void; onAssign: () => void; onReturn: () => void; onRequest: () => void; onAsset: (asset: Asset) => void;
+function Dashboard({ assets, requests, movements, employeeMap, assetMap, onView, onAddAsset, onAssign, onReturn, onRequest, onAsset }: {
+  assets: Asset[]; requests: RequestRow[]; movements: Movement[]; employeeMap: Record<string, Employee>; assetMap: Record<string, Asset>; onView: (view: View) => void; onAddAsset: () => void; onAssign: () => void; onReturn: () => void; onRequest: () => void; onAsset: (asset: Asset) => void;
 }) {
   const assigned = assets.filter((asset) => asset.status === "Assigned").length;
   const available = assets.filter((asset) => asset.status === "Available").length;
@@ -428,10 +502,11 @@ function Dashboard({ assets, employees, requests, movements, employeeMap, assetM
   );
 }
 
-function AssetsView({ assets, employeeMap, category, setCategory, onAdd, onAsset, onExport }: { assets: Asset[]; employeeMap: Record<string, Employee>; category: string; setCategory: (value: string) => void; onAdd: () => void; onAsset: (asset: Asset) => void; onExport: () => void }) {
+function AssetsView({ assets, employeeMap, category, setCategory, onAdd, onAsset, onExport, onQrBatch }: { assets: Asset[]; employeeMap: Record<string, Employee>; category: string; setCategory: (value: string) => void; onAdd: () => void; onAsset: (asset: Asset) => void; onExport: () => void; onQrBatch: () => void }) {
   return (
     <>
       <PageHead eyebrow="INVENTORY" title="Assets" description="Track every IT and non-IT item, its condition, owner and complete history.">
+        <button className="button button-secondary" onClick={onQrBatch}><QrCode size={17} />Print QR labels</button>
         <button className="button button-secondary" onClick={onExport}><Download size={17} />Export</button>
         <button className="button button-primary" onClick={onAdd}><Plus size={17} />Add asset</button>
       </PageHead>
@@ -478,13 +553,18 @@ function MovementsView({ movements, assetMap, employeeMap, onAssign, onReturn }:
   );
 }
 
-function RequirementsView({ requests, setRequests, onAdd, onExport }: { requests: RequestRow[]; setRequests: React.Dispatch<React.SetStateAction<RequestRow[]>>; onAdd: () => void; onExport: () => void }) {
+function RequirementsView({ requests, setRequests, windowConfig, setWindowConfig, onSchedule, onAdd, onExport }: { requests: RequestRow[]; setRequests: React.Dispatch<React.SetStateAction<RequestRow[]>>; windowConfig: RequirementWindowRecord; setWindowConfig: (value: RequirementWindowRecord) => void; onSchedule: () => void; onAdd: () => void; onExport: () => void }) {
+  const formUrl = typeof window === "undefined" ? "" : `${window.location.origin}/requirements/${windowConfig.slug}`;
+  async function copyFormLink() {
+    await navigator.clipboard.writeText(formUrl);
+  }
   return (
     <>
       <PageHead eyebrow="PLANNING WINDOW" title="Department requirements" description="Collect upcoming two-month needs in one controlled submission window.">
-        <button className="button button-secondary" onClick={onExport}><Download size={17} />Export summary</button><button className="button button-primary" onClick={onAdd}><Plus size={17} />Submit requirement</button>
+        <button className="button button-secondary" onClick={onExport}><Download size={17} />Export summary</button><button className="button button-primary" onClick={onSchedule}><CalendarClock size={17} />Manage window</button>
       </PageHead>
-      <div className="window-banner"><div className="window-icon"><CalendarClock size={24} /></div><div><span>SUBMISSION WINDOW OPEN</span><h3>August–September 2026 requirements</h3><p>Departments can submit needs until 31 August 2026 at 5:00 PM.</p></div><div className="countdown"><strong>34</strong><span>days left</span></div></div>
+      <div className={windowConfig.isOpen ? "window-banner" : "window-banner window-closed"}><div className="window-icon"><CalendarClock size={24} /></div><div><span>{windowConfig.isOpen ? "SUBMISSION WINDOW OPEN" : "SUBMISSIONS CLOSED"}</span><h3>{windowConfig.title}</h3><p>{windowConfig.periodLabel} · {new Date(windowConfig.opensAt).toLocaleDateString("en-GB")} to {new Date(windowConfig.closesAt).toLocaleString("en-GB")}</p></div><div className="window-actions"><button onClick={copyFormLink}><Copy size={15} />Copy form link</button><a href={formUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />Preview</a></div></div>
+      <div className="requirement-admin-actions"><button className="button button-secondary" onClick={onAdd}><Plus size={16} />Add on behalf of department</button><button className="button button-secondary" onClick={async () => { const next = { ...windowConfig, isOpen: !windowConfig.isOpen }; setWindowConfig(next); await saveRequirementWindow(next); }}>{windowConfig.isOpen ? <X size={16} /> : <Check size={16} />}{windowConfig.isOpen ? "Close form now" : "Open form now"}</button><span>Shareable URL: <code>{formUrl}</code></span></div>
       <section className="panel table-panel">
         <div className="table-toolbar"><div><strong>Submitted requirements</strong><small>{requests.reduce((sum, row) => sum + row.quantity, 0)} total items requested</small></div><span className="audit-badge">{requests.length} submissions</span></div>
         <div className="responsive-table"><table><thead><tr><th>Department</th><th>Requirement</th><th>Qty</th><th>Needed by</th><th>Reason</th><th>Status</th></tr></thead><tbody>{requests.map((request) => <tr key={request.id}><td><strong>{request.department}</strong></td><td>{request.item}</td><td><span className="qty">{request.quantity}</span></td><td>{new Date(request.neededDate).toLocaleDateString("en-GB")}</td><td className="reason-cell">{request.reason}</td><td><select className={statusClass(request.status)} value={request.status} onChange={async (event) => { const next = { ...request, status: event.target.value as RequestRow["status"] }; setRequests((rows) => rows.map((row) => row.id === request.id ? next : row)); await saveRecord("requirements", next); }}><option>Pending</option><option>Approved</option><option>Declined</option></select></td></tr>)}</tbody></table></div>
@@ -516,7 +596,7 @@ function AssetTable({ assets, employeeMap, onAsset, compact = false }: { assets:
 
 function AssetDrawer({ asset, employee, movements, employeeMap, onClose }: { asset: Asset; employee?: Employee; movements: Movement[]; employeeMap: Record<string, Employee>; onClose: () => void }) {
   const [qr, setQr] = useState("");
-  useEffect(() => { QRCode.toDataURL(`${window.location.origin}/?asset=${asset.id}`, { width: 240, margin: 1, color: { dark: "#111827", light: "#ffffff" } }).then(setQr); }, [asset.id]);
+  useEffect(() => { QRCode.toDataURL(`${window.location.origin}/asset/${asset.id}`, { width: 240, margin: 1, color: { dark: "#111827", light: "#ffffff" } }).then(setQr); }, [asset.id]);
   return <><button className="drawer-backdrop" aria-label="Close asset details" onClick={onClose} /><aside className="drawer"><div className="drawer-head"><div><span>{asset.code}</span><h2>{asset.name}</h2></div><button className="icon-button" onClick={onClose}><X size={20} /></button></div><div className="drawer-body"><div className="asset-hero"><span className="asset-big-icon"><Monitor size={34} /></span><div><span className={statusClass(asset.status)}>{asset.status}</span><p>{asset.brand} · {asset.model}</p></div></div><section className="detail-section"><h3>Asset details</h3><div className="detail-grid"><label>Serial number<strong>{asset.serial}</strong></label><label>Condition<strong>{asset.condition}</strong></label><label>Category<strong>{asset.category}</strong></label><label>Type<strong>{asset.type}</strong></label></div><p className="spec-box">{asset.details}</p></section><section className="detail-section"><h3>Current custodian</h3>{employee ? <div className="owner-card"><span>{initials(employee.name)}</span><div><strong>{employee.name}</strong><small>{employee.empNo} · {employee.department}</small><a href={`mailto:${employee.email}`}>{employee.email}</a></div></div> : <div className="empty-owner"><Package size={21} />Available in central stock</div>}</section><section className="detail-section qr-section"><div><h3>Live QR label</h3><p>Print and attach this code. Scanning always opens the latest asset record.</p><button className="button button-secondary" onClick={() => window.print()}><Printer size={16} />Print label</button></div>{qr && <img src={qr} alt={`QR code for ${asset.code}`} />}</section><section className="detail-section"><h3>History</h3><div className="mini-history">{movements.length ? movements.map((movement) => <div key={movement.id}><i /><div><strong>{movement.type}</strong><p>{employeeMap[movement.employeeId]?.name} · {movement.note}</p><small>{new Date(movement.date).toLocaleDateString("en-GB")}</small></div></div>) : <p className="muted">No previous movements.</p>}</div></section></div></aside></>;
 }
 
@@ -549,8 +629,7 @@ function ReturnForm({ assets, employees, onSave }: { assets: Asset[]; employees:
   const [selected, setSelected] = useState<string[]>([]);
   const [clearance, setClearance] = useState(false);
   const owned = assets.filter((asset) => asset.employeeId === employeeId);
-  useEffect(() => setSelected([]), [employeeId]);
-  return <form onSubmit={(event) => { event.preventDefault(); if (selected.length) onSave(selected, employeeId, clearance); }}><label className="stacked-label">Employee<select value={employeeId} onChange={(event) => setEmployeeId(event.target.value)}>{assignedEmployees.map((employee) => <option value={employee.id} key={employee.id}>{employee.name} · {employee.department}</option>)}</select></label><p className="field-heading">Choose returned items</p><div className="check-list">{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial}</small></span><em>{asset.condition}</em></label>)}</div><label className="clearance-check"><input type="checkbox" checked={clearance} onChange={(event) => setClearance(event.target.checked)} /><span><strong>Employee clearance return</strong><small>Mark these items as part of final resignation clearance</small></span></label><FormActions text={clearance ? "Return & prepare clearance" : "Record return"} disabled={!selected.length} /></form>;
+  return <form onSubmit={(event) => { event.preventDefault(); if (selected.length) onSave(selected, employeeId, clearance); }}><label className="stacked-label">Employee<select value={employeeId} onChange={(event) => { setEmployeeId(event.target.value); setSelected([]); }}>{assignedEmployees.map((employee) => <option value={employee.id} key={employee.id}>{employee.name} · {employee.department}</option>)}</select></label><p className="field-heading">Choose returned items</p><div className="check-list">{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial}</small></span><em>{asset.condition}</em></label>)}</div><label className="clearance-check"><input type="checkbox" checked={clearance} onChange={(event) => setClearance(event.target.checked)} /><span><strong>Employee clearance return</strong><small>Mark these items as part of final resignation clearance</small></span></label><FormActions text={clearance ? "Return & prepare clearance" : "Record return"} disabled={!selected.length} /></form>;
 }
 
 function RequestForm({ onSave }: { onSave: (request: RequestRow) => void }) {
@@ -563,7 +642,59 @@ function PrintableDocument({ type, employees, assets }: { type: string; employee
   const [employeeId, setEmployeeId] = useState(employees[0]?.id || "");
   const employee = employees.find((row) => row.id === employeeId);
   const owned = assets.filter((asset) => asset.employeeId === employeeId);
-  return <div><div className="document-controls"><label>Employee<select value={employeeId} onChange={(event) => setEmployeeId(event.target.value)}>{employees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><button className="button button-primary" onClick={() => window.print()}><Printer size={17} />Print / Save PDF</button></div><article className="print-document"><header><div><strong>ASSETFLOW</strong><span>Company Asset Management</span></div><p>{type}</p></header><div className="document-title"><span>{type.toUpperCase()}</span><h1>{employee?.name}</h1><p>{employee?.empNo} · {employee?.designation} · {employee?.department}</p></div><div className="document-meta"><span>Document date<strong>{new Date().toLocaleDateString("en-GB")}</strong></span><span>Reference<strong>AF-{Date.now().toString().slice(-7)}</strong></span><span>Items covered<strong>{owned.length}</strong></span></div><table><thead><tr><th>#</th><th>Asset / item</th><th>Asset code</th><th>Serial number</th><th>Condition</th></tr></thead><tbody>{owned.map((asset, index) => <tr key={asset.id}><td>{index + 1}</td><td><strong>{asset.name}</strong><small>{asset.details}</small></td><td>{asset.code}</td><td>{asset.serial}</td><td>{asset.condition}</td></tr>)}</tbody></table><p className="document-statement">{type.includes("Clearance") ? "The above items have been returned to the company and verified by the responsible department. Any exceptions must be recorded before final clearance." : "I acknowledge receipt and responsibility for the company assets listed above. I agree to use them for authorised company work and return them in good condition when requested."}</p><div className="signature-grid"><span>Employee signature<small>Name & date</small></span><span>Issued / received by<small>IT Department</small></span><span>Authorised by<small>Department Head</small></span></div><footer>Generated from AssetFlow · Live company asset register</footer></article></div>;
+  const [selected, setSelected] = useState<string[]>(() => assets.filter((asset) => asset.employeeId === employees[0]?.id).map((asset) => asset.id));
+  const included = owned.filter((asset) => selected.includes(asset.id));
+  return <div><div className="document-controls"><label>Employee<select value={employeeId} onChange={(event) => { const nextId = event.target.value; setEmployeeId(nextId); setSelected(assets.filter((asset) => asset.employeeId === nextId).map((asset) => asset.id)); }}>{employees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><button className="button button-primary" onClick={() => window.print()}><Printer size={17} />Print / Save PDF</button></div><div className="document-item-picker"><div><strong>Select items for this document</strong><span>{selected.length} of {owned.length} included</span></div><div>{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} />{asset.name}<small>{asset.code}</small></label>)}</div></div><article className="print-document"><div className="document-accent" /><header><div><strong>ASSETFLOW</strong><span>Company Asset Management · Official Record</span></div><p>{type}</p></header><div className="document-title"><span>{type.toUpperCase()}</span><h1>{employee?.name}</h1><p>{employee?.empNo} · {employee?.designation} · {employee?.department}</p></div><div className="document-meta"><span>Document date<strong>{new Date().toLocaleDateString("en-GB")}</strong></span><span>Reference<strong>AF-{employee?.empNo || "UNASSIGNED"}-{type.replaceAll(" ", "-").toUpperCase()}</strong></span><span>Items covered<strong>{included.length}</strong></span></div><table><thead><tr><th>#</th><th>Asset / item</th><th>Asset code</th><th>Serial number</th><th>Condition</th></tr></thead><tbody>{included.map((asset, index) => <tr key={asset.id}><td>{String(index + 1).padStart(2, "0")}</td><td><strong>{asset.name}</strong><small>{asset.details}</small></td><td>{asset.code}</td><td>{asset.serial}</td><td><span className="document-condition">{asset.condition}</span></td></tr>)}</tbody></table><p className="document-statement">{type.includes("Clearance") ? "The assets listed above have been returned to the company and verified by the responsible department. Any exception or damage must be recorded before final employee clearance is approved." : "I acknowledge receipt and responsibility for the company assets listed above. I agree to use them only for authorised company work, take reasonable care of them, and return them in good condition when requested."}</p><div className="signature-grid"><span>Employee signature<small>Name, signature & date</small></span><span>Issued / received by<small>IT Department</small></span><span>Authorised by<small>Department Head</small></span></div><footer><strong>AssetFlow verified document</strong><span>Generated from the live company asset register · {new Date().toLocaleString("en-GB")}</span></footer></article></div>;
+}
+
+function QrBatch({ assets, employeeMap }: { assets: Asset[]; employeeMap: Record<string, Employee> }) {
+  const [category, setCategory] = useState("All");
+  const filtered = assets.filter((asset) => category === "All" || asset.category === category);
+  const [selected, setSelected] = useState<string[]>(assets.map((asset) => asset.id));
+  const visible = filtered.filter((asset) => selected.includes(asset.id));
+  return <div className="qr-batch">
+    <div className="qr-batch-toolbar">
+      <label>Asset group<select value={category} onChange={(event) => setCategory(event.target.value)}><option>All</option><option>IT Asset</option><option>Non-IT Asset</option></select></label>
+      <div><button className="button button-secondary" onClick={() => setSelected((rows) => filtered.every((asset) => rows.includes(asset.id)) ? rows.filter((id) => !filtered.some((asset) => asset.id === id)) : Array.from(new Set([...rows, ...filtered.map((asset) => asset.id)])))}><Check size={16} />Select / clear group</button><button className="button button-primary" disabled={!visible.length} onClick={() => window.print()}><Printer size={17} />Print {visible.length} labels</button></div>
+    </div>
+    <div className="qr-batch-tip"><QrCode size={19} /><div><strong>Fast method for 100+ labels</strong><p>Filter a group, select all, then print on A4 adhesive label sheets. AssetFlow automatically arranges 24 labels per page; no one-by-one printing.</p></div></div>
+    <div className="qr-select-list">{filtered.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial}</small></span><em>{asset.employeeId ? employeeMap[asset.employeeId]?.name : "In stock"}</em></label>)}</div>
+    <section className="qr-print-sheet">{visible.map((asset) => <QrLabel key={asset.id} asset={asset} owner={asset.employeeId ? employeeMap[asset.employeeId]?.name : undefined} />)}</section>
+  </div>;
+}
+
+function QrLabel({ asset, owner }: { asset: Asset; owner?: string }) {
+  const [src, setSrc] = useState("");
+  useEffect(() => {
+    QRCode.toDataURL(`${window.location.origin}/asset/${asset.id}`, {
+      width: 180,
+      margin: 0,
+      errorCorrectionLevel: "M",
+      color: { dark: "#171422", light: "#ffffff" },
+    }).then(setSrc);
+  }, [asset.id]);
+  return <article className="qr-label"><div className="qr-label-brand"><ShieldCheck size={13} /><strong>ASSETFLOW</strong></div>{src && <img src={src} alt="" />}<div><strong>{asset.name}</strong><span>{asset.code}</span><small>{asset.serial}</small><em>{owner || "IT Department stock"}</em></div></article>;
+}
+
+function ScheduleForm({ value, onSave }: { value: RequirementWindowRecord; onSave: (next: RequirementWindowRecord) => void }) {
+  const [form, setForm] = useState(value);
+  const field = (key: keyof RequirementWindowRecord) => ({
+    value: String(form[key]),
+    onChange: (event: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [key]: event.target.value }),
+  });
+  return <form className="form-grid" onSubmit={(event) => { event.preventDefault(); onSave(form); }}>
+    <label className="full">Form title<input required {...field("title")} /></label>
+    <label>Planning period<input required placeholder="August–September 2026" {...field("periodLabel")} /></label>
+    <label>Shareable link name<input required pattern="[a-z0-9-]+" {...field("slug")} onChange={(event) => setForm({ ...form, slug: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-") })} /></label>
+    <label>Opens at<input required type="datetime-local" {...field("opensAt")} /></label>
+    <label>Closes at<input required type="datetime-local" {...field("closesAt")} /></label>
+    <label className="schedule-toggle full"><input type="checkbox" checked={form.isOpen} onChange={(event) => setForm({ ...form, isOpen: event.target.checked })} /><span><strong>Accept submissions</strong><small>The date range still applies when this switch is on.</small></span></label>
+    <FormActions text="Save requirement window" />
+  </form>;
+}
+
+function AdminGate({ state, email, onSignIn, onSignOut }: { state: "loading" | "signed-out" | "admin" | "denied"; email: string; onSignIn: () => void; onSignOut: () => void }) {
+  return <main className="admin-gate"><section><div className="admin-gate-brand"><ShieldCheck size={27} /><strong>AssetFlow</strong></div>{state === "loading" ? <><span className="gate-icon"><CircleDot size={27} /></span><h1>Verifying administrator…</h1></> : state === "denied" ? <><span className="gate-icon denied"><LockKeyhole size={27} /></span><h1>Dashboard access restricted</h1><p><strong>{email}</strong> is signed in, but only <strong>{ADMIN_EMAIL}</strong> can access company asset controls.</p><button className="button button-primary" onClick={onSignOut}><LogOut size={17} />Sign out and switch account</button></> : <><span className="gate-icon"><LockKeyhole size={27} /></span><h1>Administrator sign in</h1><p>Asset records, employee data and management controls are restricted to <strong>{ADMIN_EMAIL}</strong>.</p><button className="button button-primary" onClick={onSignIn}><ShieldCheck size={17} />Continue with Google</button></>}<small>Public QR records and department requirement forms do not expose this dashboard.</small></section></main>;
 }
 
 function PageHead({ eyebrow, title, description, children }: { eyebrow: string; title: string; description: string; children?: React.ReactNode }) {
@@ -583,5 +714,5 @@ function FormActions({ text, disabled = false }: { text: string; disabled?: bool
 }
 
 function modalTitle(modal: string) {
-  return { asset: "Add a new asset", employee: "Add employee", assign: "Assign assets", return: "Return assets", request: "Submit requirement", document: "Generate document" }[modal] || modal;
+  return { asset: "Add a new asset", employee: "Add employee", assign: "Assign assets", return: "Return assets", request: "Submit requirement", document: "Generate document", qrBatch: "Batch QR label printing", schedule: "Requirement form window" }[modal] || modal;
 }

@@ -1,11 +1,21 @@
 import { getApps, initializeApp } from "firebase/app";
 import {
+  getAuth,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signInWithPopup,
+  signOut,
+  type User,
+} from "firebase/auth";
+import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getFirestore,
   onSnapshot,
   setDoc,
+  Timestamp,
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -26,6 +36,27 @@ const app = firebaseReady
   : null;
 
 export const db = app ? getFirestore(app) : null;
+export const auth = app ? getAuth(app) : null;
+export const ADMIN_EMAIL = "it@scot.lk";
+
+export function watchAuth(callback: (user: User | null) => void) {
+  if (!auth) {
+    callback(null);
+    return () => undefined;
+  }
+  return onAuthStateChanged(auth, callback);
+}
+
+export async function signInAsAdmin() {
+  if (!auth) throw new Error("Firebase is not configured.");
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ login_hint: ADMIN_EMAIL, prompt: "select_account" });
+  return signInWithPopup(auth, provider);
+}
+
+export async function signOutAdmin() {
+  if (auth) await signOut(auth);
+}
 
 export function watchCollection<T extends { id: string }>(
   name: string,
@@ -48,4 +79,46 @@ export async function saveRecord<T extends { id: string }>(
 export async function removeRecord(name: string, id: string) {
   if (!db) return;
   await deleteDoc(doc(db, name, id));
+}
+
+export async function getRecord<T>(name: string, id: string) {
+  if (!db) return null;
+  const snapshot = await getDoc(doc(db, name, id));
+  return snapshot.exists() ? (snapshot.data() as T) : null;
+}
+
+export type RequirementWindowRecord = {
+  id: "requirement-window";
+  title: string;
+  slug: string;
+  opensAt: string;
+  closesAt: string;
+  isOpen: boolean;
+  periodLabel: string;
+};
+
+export async function getRequirementWindow() {
+  if (!db) return null;
+  const snapshot = await getDoc(doc(db, "settings", "requirement-window"));
+  if (!snapshot.exists()) return null;
+  const data = snapshot.data();
+  const toInputDate = (value: unknown) =>
+    value instanceof Timestamp
+      ? value.toDate().toISOString().slice(0, 16)
+      : String(value ?? "");
+  return {
+    ...data,
+    id: "requirement-window",
+    opensAt: toInputDate(data.opensAt),
+    closesAt: toInputDate(data.closesAt),
+  } as RequirementWindowRecord;
+}
+
+export async function saveRequirementWindow(value: RequirementWindowRecord) {
+  if (!db) return;
+  await setDoc(doc(db, "settings", "requirement-window"), {
+    ...value,
+    opensAt: Timestamp.fromDate(new Date(value.opensAt)),
+    closesAt: Timestamp.fromDate(new Date(value.closesAt)),
+  });
 }
