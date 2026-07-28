@@ -20,6 +20,7 @@ import {
   LayoutDashboard,
   LockKeyhole,
   LogOut,
+  Mail,
   Menu,
   Monitor,
   Package,
@@ -39,6 +40,7 @@ import QRCode from "qrcode";
 import { useEffect, useMemo, useState } from "react";
 import {
   ADMIN_EMAIL,
+  DEFAULT_REQUIREMENT_WINDOW,
   firebaseReady,
   getRequirementWindow,
   saveRecord,
@@ -153,21 +155,15 @@ export default function Home() {
     firebaseReady ? "loading" : "admin",
   );
   const [signedInEmail, setSignedInEmail] = useState("");
-  const [requirementWindow, setRequirementWindow] = useState<RequirementWindowRecord>({
-    id: "requirement-window",
-    title: "Next department requirements",
-    slug: "next-requirements",
-    opensAt: "2026-07-29T08:00",
-    closesAt: "2026-08-31T17:00",
-    isOpen: false,
-    periodLabel: "Next planning period",
-  });
+  const [requirementWindow, setRequirementWindow] = useState<RequirementWindowRecord>(DEFAULT_REQUIREMENT_WINDOW);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [department, setDepartment] = useState("All");
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
-  const [modal, setModal] = useState<"asset" | "employee" | "assign" | "return" | "request" | "document" | "qrBatch" | "schedule" | null>(null);
+  const [modal, setModal] = useState<"asset" | "employee" | "assign" | "return" | "repair" | "request" | "document" | "qrBatch" | "schedule" | null>(null);
   const [documentType, setDocumentType] = useState("Asset Handover");
+  const [documentEmployeeId, setDocumentEmployeeId] = useState("");
+  const [documentAssetIds, setDocumentAssetIds] = useState<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState("");
 
@@ -286,10 +282,16 @@ export default function Home() {
     flash("Excel report downloaded");
   }
 
-  function openDocument(type: string) {
+  function openDocument(type: string, employeeId = "", assetIds: string[] = []) {
     setDocumentType(type);
+    setDocumentEmployeeId(employeeId);
+    setDocumentAssetIds(assetIds);
     setModal("document");
   }
+
+  const pendingRequirements = requests.filter((request) => request.status === "Pending").length;
+  const healthyAssets = assets.filter((asset) => asset.status !== "In repair" && asset.status !== "Retired").length;
+  const inventoryHealth = assets.length ? Math.round((healthyAssets / assets.length) * 100) : 100;
 
   if (firebaseReady && adminState !== "admin") {
     return <AdminGate state={adminState} email={signedInEmail} onSignIn={async () => {
@@ -318,16 +320,16 @@ export default function Home() {
               onClick={() => { setView(name); setSearch(""); setSidebarOpen(false); }}
             >
               <Icon size={19} />{name}
-              {name === "Requirements" && <span className="nav-count">4</span>}
+              {name === "Requirements" && pendingRequirements > 0 && <span className="nav-count">{pendingRequirements}</span>}
             </button>
           ))}
           <p className="nav-label second">MANAGEMENT</p>
-          <button className="nav-item"><Building2 size={19} />Departments</button>
-          <button className="nav-item"><Settings size={19} />Settings</button>
+          <button className="nav-item" onClick={() => { setView("Employees"); setDepartment("All"); }}><Building2 size={19} />Department directory</button>
+          <button className="nav-item" onClick={() => { setView("Requirements"); setModal("schedule"); }}><Settings size={19} />Requirement settings</button>
         </nav>
         <div className="sidebar-foot">
-          <div className="storage-row"><span>Inventory health</span><strong>94%</strong></div>
-          <div className="progress"><span /></div>
+          <div className="storage-row"><span>Inventory health</span><strong>{inventoryHealth}%</strong></div>
+          <div className="progress"><span style={{ width: `${inventoryHealth}%` }} /></div>
           <small>{assets.filter((a) => a.status !== "Retired").length} active assets tracked</small>
         </div>
       </aside>
@@ -339,7 +341,7 @@ export default function Home() {
           <div className="top-actions">
             <span className={firebaseReady ? "sync-pill live" : "sync-pill"}><CircleDot size={13} />{firebaseReady ? "Firebase live" : "Demo workspace"}</span>
             <button className="icon-button"><Bell size={19} /><i /></button>
-            <div className="profile"><span>DA</span><div><strong>Disitha Admin</strong><small>Asset Manager</small></div><ChevronDown size={16} /></div>
+            <div className="profile"><span>IT</span><div><strong>IT Services</strong><small>{signedInEmail || ADMIN_EMAIL}</small></div><ChevronDown size={16} /></div>
           </div>
         </header>
 
@@ -382,7 +384,7 @@ export default function Home() {
             />
           )}
           {view === "Movements" && (
-            <MovementsView movements={movements} assetMap={assetMap} employeeMap={employeeMap} onAssign={() => setModal("assign")} onReturn={() => setModal("return")} />
+            <MovementsView movements={movements} assetMap={assetMap} employeeMap={employeeMap} onAssign={() => setModal("assign")} onReturn={() => setModal("return")} onRepair={() => setModal("repair")} />
           )}
           {view === "Requirements" && (
             <RequirementsView requests={requests} setRequests={setRequests} windowConfig={requirementWindow} setWindowConfig={setRequirementWindow} onSchedule={() => setModal("schedule")} onAdd={() => setModal("request")} onExport={exportWorkbook} />
@@ -398,10 +400,11 @@ export default function Home() {
         <Modal title={modalTitle(modal)} wide={modal === "document"} onClose={() => setModal(null)}>
           {modal === "asset" && <AssetForm onSave={async (asset) => { setAssets((rows) => [asset, ...rows]); await saveRecord("assets", asset); setModal(null); flash("Asset added to inventory"); }} />}
           {modal === "employee" && <EmployeeForm onSave={async (employee) => { setEmployees((rows) => [employee, ...rows]); await saveRecord("employees", employee); setModal(null); flash("Employee added"); }} />}
-          {modal === "assign" && <AssignForm assets={assets} employees={employees} onSave={async (assetIds, employeeId) => { const employee = employeeMap[employeeId]; for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Assigned", employeeId, custodianName: employee?.name, custodianDepartment: employee?.department, updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: "Assigned", date: today(), note: "Asset issued through AssetFlow" }); } setModal(null); flash(`${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned`); }} />}
-          {modal === "return" && <ReturnForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, clearance) => { for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Available", employeeId: undefined, custodianName: undefined, custodianDepartment: undefined, condition: "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: clearance ? "Cleared" : "Returned", date: today(), note: clearance ? "Returned during employee clearance" : "Returned to IT stock" }); } setModal(null); flash(clearance ? "Clearance return recorded" : "Return recorded"); }} />}
+          {modal === "assign" && <AssignForm assets={assets} employees={employees} onSave={async (assetIds, employeeId) => { const employee = employeeMap[employeeId]; for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Assigned", employeeId, custodianName: employee?.name, custodianDepartment: employee?.department, updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: "Assigned", date: today(), note: "Asset issued through AssetFlow" }); } openDocument("Asset Handover", employeeId, assetIds); flash(`${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned — handover document ready`); }} />}
+          {modal === "return" && <ReturnForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, clearance) => { for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Available", employeeId: undefined, custodianName: undefined, custodianDepartment: undefined, condition: "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: clearance ? "Cleared" : "Returned", date: today(), note: clearance ? "Returned during employee clearance" : "Returned to IT stock" }); } openDocument(clearance ? "Employee Clearance" : "Asset Return", employeeId, assetIds); flash(clearance ? "Clearance report ready" : "Return document ready"); }} />}
+          {modal === "repair" && <RepairForm assets={assets} onSave={async (assetId, action, note) => { const asset = assets.find((row) => row.id === assetId); if (!asset) return; const nextStatus: AssetStatus = action === "start" ? "In repair" : asset.employeeId ? "Assigned" : "Available"; await updateAsset({ ...asset, status: nextStatus, condition: action === "start" ? "Repair" : "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId: asset.employeeId || "", type: "Repair", date: today(), note: `${action === "start" ? "Sent for repair" : "Repair completed"}: ${note}` }); setModal(null); flash(action === "start" ? "Repair record started" : "Repair completion recorded"); }} />}
           {modal === "request" && <RequestForm onSave={async (request) => { setRequests((rows) => [request, ...rows]); await saveRecord("requirements", request); setModal(null); flash("Requirement submitted"); }} />}
-          {modal === "document" && <PrintableDocument type={documentType} employees={employees} assets={assets} />}
+          {modal === "document" && <PrintableDocument type={documentType} employees={employees} assets={assets} initialEmployeeId={documentEmployeeId} initialAssetIds={documentAssetIds} />}
           {modal === "qrBatch" && <QrBatch assets={assets} employeeMap={employeeMap} />}
           {modal === "schedule" && <ScheduleForm value={requirementWindow} onSave={async (next) => { setRequirementWindow(next); await saveRequirementWindow(next); setModal(null); flash(next.isOpen ? "Requirement form opened" : "Requirement form closed"); }} />}
         </Modal>
@@ -506,15 +509,15 @@ function EmployeesView({ employees, assets, department, setDepartment, onAdd, on
   );
 }
 
-function MovementsView({ movements, assetMap, employeeMap, onAssign, onReturn }: { movements: Movement[]; assetMap: Record<string, Asset>; employeeMap: Record<string, Employee>; onAssign: () => void; onReturn: () => void }) {
+function MovementsView({ movements, assetMap, employeeMap, onAssign, onReturn, onRepair }: { movements: Movement[]; assetMap: Record<string, Asset>; employeeMap: Record<string, Employee>; onAssign: () => void; onReturn: () => void; onRepair: () => void }) {
   return (
     <>
       <PageHead eyebrow="AUDIT TRAIL" title="Asset movements" description="Every assignment, return, clearance and repair is permanently recorded.">
-        <button className="button button-secondary" onClick={onReturn}><RotateCcw size={17} />Record return</button><button className="button button-primary" onClick={onAssign}><ArrowLeftRight size={17} />New assignment</button>
+        <button className="button button-secondary" onClick={onRepair}><Wrench size={17} />Record repair</button><button className="button button-secondary" onClick={onReturn}><RotateCcw size={17} />Record return</button><button className="button button-primary" onClick={onAssign}><ArrowLeftRight size={17} />New assignment</button>
       </PageHead>
       <section className="panel timeline-panel">
         <div className="table-toolbar"><div><strong>Complete history</strong><small>Newest activity first</small></div><span className="audit-badge"><ShieldCheck size={15} />Audit-ready records</span></div>
-        <div className="timeline">{movements.map((movement) => <div key={movement.id} className="timeline-row"><div className={`timeline-mark activity-${movement.type.toLowerCase()}`}>{movement.type === "Assigned" ? <ArrowLeftRight size={17} /> : movement.type === "Repair" ? <Wrench size={17} /> : <RotateCcw size={17} />}</div><div><div className="timeline-title"><strong>{movement.type}</strong><span>{new Date(movement.date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</span></div><h3>{assetMap[movement.assetId]?.name} <small>{assetMap[movement.assetId]?.code}</small></h3><p>{movement.note}</p><span className="person-pill">{initials(employeeMap[movement.employeeId]?.name || "IT")} {employeeMap[movement.employeeId]?.name}</span></div></div>)}</div>
+        <div className="timeline">{movements.length === 0 && <div className="empty-panel"><History size={20} /><strong>No lifecycle records yet</strong><span>Assignments, returns, clearance and repairs will appear here.</span></div>}{movements.map((movement) => <div key={movement.id} className="timeline-row"><div className={`timeline-mark activity-${movement.type.toLowerCase()}`}>{movement.type === "Assigned" ? <ArrowLeftRight size={17} /> : movement.type === "Repair" ? <Wrench size={17} /> : <RotateCcw size={17} />}</div><div><div className="timeline-title"><strong>{movement.type}</strong><span>{new Date(movement.date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</span></div><h3>{assetMap[movement.assetId]?.name} <small>{assetMap[movement.assetId]?.code}</small></h3><p>{movement.note}</p><span className="person-pill">{initials(employeeMap[movement.employeeId]?.name || "IT")} {employeeMap[movement.employeeId]?.name || "IT Department"}</span></div></div>)}</div>
       </section>
     </>
   );
@@ -530,7 +533,7 @@ function RequirementsView({ requests, setRequests, windowConfig, setWindowConfig
       <PageHead eyebrow="PLANNING WINDOW" title="Department requirements" description="Collect upcoming two-month needs in one controlled submission window.">
         <button className="button button-secondary" onClick={onExport}><Download size={17} />Export summary</button><button className="button button-primary" onClick={onSchedule}><CalendarClock size={17} />Manage window</button>
       </PageHead>
-      <div className={windowConfig.isOpen ? "window-banner" : "window-banner window-closed"}><div className="window-icon"><CalendarClock size={24} /></div><div><span>{windowConfig.isOpen ? "SUBMISSION WINDOW OPEN" : "SUBMISSIONS CLOSED"}</span><h3>{windowConfig.title}</h3><p>{windowConfig.periodLabel} · {new Date(windowConfig.opensAt).toLocaleDateString("en-GB")} to {new Date(windowConfig.closesAt).toLocaleString("en-GB")}</p></div><div className="window-actions"><button onClick={copyFormLink}><Copy size={15} />Copy form link</button><a href={formUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />Preview</a></div></div>
+      <div className={windowConfig.isOpen ? "window-banner" : "window-banner window-closed"}><div className="window-icon"><CalendarClock size={24} /></div><div><span>{windowConfig.isOpen ? "SUBMISSION WINDOW OPEN" : "SUBMISSIONS CLOSED"}</span><h3>{windowConfig.title}</h3><p>{windowConfig.periodLabel} · {new Date(windowConfig.opensAt).toLocaleDateString("en-GB")} to {new Date(windowConfig.closesAt).toLocaleString("en-GB")}</p></div><div className="window-actions"><button onClick={copyFormLink}><Copy size={15} />Copy form link</button><a href={`mailto:?subject=${encodeURIComponent(windowConfig.title)}&body=${encodeURIComponent(`Please submit your department requirements using this link:\n\n${formUrl}\n\nDeadline: ${new Date(windowConfig.closesAt).toLocaleString("en-GB")}`)}`}><Mail size={15} />Email link</a><a href={formUrl} target="_blank" rel="noreferrer"><ExternalLink size={15} />Preview</a></div></div>
       <div className="requirement-admin-actions"><button className="button button-secondary" onClick={onAdd}><Plus size={16} />Add on behalf of department</button><button className="button button-secondary" onClick={async () => { const next = { ...windowConfig, isOpen: !windowConfig.isOpen }; setWindowConfig(next); await saveRequirementWindow(next); }}>{windowConfig.isOpen ? <X size={16} /> : <Check size={16} />}{windowConfig.isOpen ? "Close form now" : "Open form now"}</button><span>Shareable URL: <code>{formUrl}</code></span></div>
       <section className="panel table-panel">
         <div className="table-toolbar"><div><strong>Submitted requirements</strong><small>{requests.reduce((sum, row) => sum + row.quantity, 0)} total items requested</small></div><span className="audit-badge">{requests.length} submissions</span></div>
@@ -599,19 +602,36 @@ function ReturnForm({ assets, employees, onSave }: { assets: Asset[]; employees:
   return <form onSubmit={(event) => { event.preventDefault(); if (selected.length) onSave(selected, employeeId, clearance); }}><label className="stacked-label">Employee<select value={employeeId} onChange={(event) => { setEmployeeId(event.target.value); setSelected([]); }}>{assignedEmployees.map((employee) => <option value={employee.id} key={employee.id}>{employee.name} · {employee.department}</option>)}</select></label><p className="field-heading">Choose returned items</p><div className="check-list">{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial}</small></span><em>{asset.condition}</em></label>)}</div><label className="clearance-check"><input type="checkbox" checked={clearance} onChange={(event) => setClearance(event.target.checked)} /><span><strong>Employee clearance return</strong><small>Mark these items as part of final resignation clearance</small></span></label><FormActions text={clearance ? "Return & prepare clearance" : "Record return"} disabled={!selected.length} /></form>;
 }
 
+function RepairForm({ assets, onSave }: { assets: Asset[]; onSave: (assetId: string, action: "start" | "complete", note: string) => void }) {
+  const repairable = assets.filter((asset) => asset.status !== "Retired");
+  const [assetId, setAssetId] = useState(repairable[0]?.id || "");
+  const [action, setAction] = useState<"start" | "complete">("start");
+  const [note, setNote] = useState("");
+  const selectedAsset = assets.find((asset) => asset.id === assetId);
+  return <form className="form-grid" onSubmit={(event) => { event.preventDefault(); if (assetId && note.trim()) onSave(assetId, action, note.trim()); }}>
+    <label className="full">Asset<select value={assetId} onChange={(event) => { const nextId = event.target.value; setAssetId(nextId); setAction(assets.find((asset) => asset.id === nextId)?.status === "In repair" ? "complete" : "start"); }}>{repairable.map((asset) => <option key={asset.id} value={asset.id}>{asset.name} · {asset.code} · {asset.serial}</option>)}</select></label>
+    <label className="full">Repair action<select value={action} onChange={(event) => setAction(event.target.value as "start" | "complete")}><option value="start">Send for repair</option><option value="complete">Mark repair completed</option></select></label>
+    <label className="full">Repair details<textarea required minLength={5} placeholder="Fault, supplier, job reference, parts replaced or completion notes…" value={note} onChange={(event) => setNote(event.target.value)} /></label>
+    {selectedAsset && <p className="full audit-badge">Current status: {selectedAsset.status} · Current condition: {selectedAsset.condition}</p>}
+    <FormActions text={action === "start" ? "Start repair record" : "Complete repair record"} disabled={!assetId || note.trim().length < 5} />
+  </form>;
+}
+
 function RequestForm({ onSave }: { onSave: (request: RequestRow) => void }) {
   const [form, setForm] = useState({ department: departments[0], item: "", quantity: "1", neededDate: "2026-09-01", reason: "" });
   const field = (key: keyof typeof form) => ({ value: form[key], onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm({ ...form, [key]: event.target.value }) });
   return <form className="form-grid" onSubmit={(event) => { event.preventDefault(); onSave({ id: crypto.randomUUID(), department: form.department, item: form.item, quantity: Number(form.quantity), neededDate: form.neededDate, reason: form.reason, status: "Pending" }); }}><label className="full">Department<select {...field("department")}>{departments.map((item) => <option key={item}>{item}</option>)}</select></label><label className="full">Required item<input required placeholder="e.g. 24” monitor or Office licence key" {...field("item")} /></label><label>Quantity<input required min="1" type="number" {...field("quantity")} /></label><label>Needed date<input required type="date" {...field("neededDate")} /></label><label className="full">Business reason<textarea required placeholder="Explain the upcoming need, new employee, replacement or project…" {...field("reason")} /></label><FormActions text="Submit requirement" /></form>;
 }
 
-function PrintableDocument({ type, employees, assets }: { type: string; employees: Employee[]; assets: Asset[] }) {
-  const [employeeId, setEmployeeId] = useState(employees[0]?.id || "");
+function PrintableDocument({ type, employees, assets, initialEmployeeId = "", initialAssetIds = [] }: { type: string; employees: Employee[]; assets: Asset[]; initialEmployeeId?: string; initialAssetIds?: string[] }) {
+  const [employeeId, setEmployeeId] = useState(initialEmployeeId || employees[0]?.id || "");
   const employee = employees.find((row) => row.id === employeeId);
-  const owned = assets.filter((asset) => asset.employeeId === employeeId);
-  const [selected, setSelected] = useState<string[]>(() => assets.filter((asset) => asset.employeeId === employees[0]?.id).map((asset) => asset.id));
+  const contextualAssets = initialAssetIds.length ? assets.filter((asset) => initialAssetIds.includes(asset.id)) : assets.filter((asset) => asset.employeeId === employeeId);
+  const [selected, setSelected] = useState<string[]>(() => initialAssetIds.length ? initialAssetIds : assets.filter((asset) => asset.employeeId === (initialEmployeeId || employees[0]?.id)).map((asset) => asset.id));
+  const owned = initialAssetIds.length ? contextualAssets : assets.filter((asset) => asset.employeeId === employeeId);
   const included = owned.filter((asset) => selected.includes(asset.id));
-  return <div><div className="document-controls"><label>Employee<select value={employeeId} onChange={(event) => { const nextId = event.target.value; setEmployeeId(nextId); setSelected(assets.filter((asset) => asset.employeeId === nextId).map((asset) => asset.id)); }}>{employees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><button className="button button-primary" onClick={() => window.print()}><Printer size={17} />Print / Save PDF</button></div><div className="document-item-picker"><div><strong>Select items for this document</strong><span>{selected.length} of {owned.length} included</span></div><div>{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} />{asset.name}<small>{asset.code}</small></label>)}</div></div><article className="print-document"><div className="document-accent" /><header><div><strong>ASSETFLOW</strong><span>Company Asset Management · Official Record</span></div><p>{type}</p></header><div className="document-title"><span>{type.toUpperCase()}</span><h1>{employee?.name}</h1><p>{employee?.empNo} · {employee?.designation} · {employee?.department}</p></div><div className="document-meta"><span>Document date<strong>{new Date().toLocaleDateString("en-GB")}</strong></span><span>Reference<strong>AF-{employee?.empNo || "UNASSIGNED"}-{type.replaceAll(" ", "-").toUpperCase()}</strong></span><span>Items covered<strong>{included.length}</strong></span></div><table><thead><tr><th>#</th><th>Asset / item</th><th>Asset code</th><th>Serial number</th><th>Condition</th></tr></thead><tbody>{included.map((asset, index) => <tr key={asset.id}><td>{String(index + 1).padStart(2, "0")}</td><td><strong>{asset.name}</strong><small>{asset.details}</small></td><td>{asset.code}</td><td>{asset.serial}</td><td><span className="document-condition">{asset.condition}</span></td></tr>)}</tbody></table><p className="document-statement">{type.includes("Clearance") ? "The assets listed above have been returned to the company and verified by the responsible department. Any exception or damage must be recorded before final employee clearance is approved." : "I acknowledge receipt and responsibility for the company assets listed above. I agree to use them only for authorised company work, take reasonable care of them, and return them in good condition when requested."}</p><div className="signature-grid"><span>Employee signature<small>Name, signature & date</small></span><span>Issued / received by<small>IT Department</small></span><span>Authorised by<small>Department Head</small></span></div><footer><strong>AssetFlow verified document</strong><span>Generated from the live company asset register · {new Date().toLocaleString("en-GB")}</span></footer></article></div>;
+  const returnDocument = type.includes("Return") || type.includes("Clearance");
+  return <div><div className="document-controls"><label>Employee<select value={employeeId} disabled={Boolean(initialEmployeeId)} onChange={(event) => { const nextId = event.target.value; setEmployeeId(nextId); setSelected(assets.filter((asset) => asset.employeeId === nextId).map((asset) => asset.id)); }}>{employees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><button className="button button-primary" disabled={!employee || !included.length} onClick={() => window.print()}><Printer size={17} />Print / Save PDF</button></div><div className="document-item-picker"><div><strong>Select items for this document</strong><span>{selected.length} of {owned.length} included</span></div><div>{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} />{asset.name}<small>{asset.code}</small></label>)}</div></div><article className="print-document"><div className="document-accent" /><header><div><strong>ASSETFLOW</strong><span>Company Asset Management · Official Record</span></div><p>{type}</p></header><div className="document-title"><span>{type.toUpperCase()}</span><h1>{employee?.name || "Select an employee"}</h1><p>{employee ? `${employee.empNo} · ${employee.designation} · ${employee.department}` : "No employee selected"}</p></div><div className="document-meta"><span>Document date<strong>{new Date().toLocaleDateString("en-GB")}</strong></span><span>Reference<strong>AF-{employee?.empNo || "UNASSIGNED"}-{type.replaceAll(" ", "-").toUpperCase()}</strong></span><span>Items covered<strong>{included.length}</strong></span></div><table><thead><tr><th>#</th><th>Asset / item</th><th>Asset code</th><th>Serial number</th><th>Condition</th></tr></thead><tbody>{included.map((asset, index) => <tr key={asset.id}><td>{String(index + 1).padStart(2, "0")}</td><td><strong>{asset.name}</strong><small>{asset.details}</small></td><td>{asset.code}</td><td>{asset.serial}</td><td><span className="document-condition">{asset.condition}</span></td></tr>)}</tbody></table><p className="document-statement">{returnDocument ? "The assets listed above have been returned to the company and verified by the responsible department. Any exception or damage must be recorded before final employee clearance is approved." : "I acknowledge receipt and responsibility for the company assets listed above. I agree to use them only for authorised company work, take reasonable care of them, and return them in good condition when requested."}</p><div className="signature-grid"><span>Employee signature<small>Name, signature & date</small></span><span>Issued / received by<small>IT Department</small></span><span>Authorised by<small>Department Head</small></span></div><footer><strong>AssetFlow verified document</strong><span>Generated from the live company asset register · {new Date().toLocaleString("en-GB")}</span></footer></article></div>;
 }
 
 function QrBatch({ assets, employeeMap }: { assets: Asset[]; employeeMap: Record<string, Employee> }) {
@@ -681,5 +701,5 @@ function FormActions({ text, disabled = false }: { text: string; disabled?: bool
 }
 
 function modalTitle(modal: string) {
-  return { asset: "Add a new asset", employee: "Add employee", assign: "Assign assets", return: "Return assets", request: "Submit requirement", document: "Generate document", qrBatch: "Batch QR label printing", schedule: "Requirement form window" }[modal] || modal;
+  return { asset: "Add a new asset", employee: "Add employee", assign: "Assign assets", return: "Return assets", repair: "Record asset repair", request: "Submit requirement", document: "Generate document", qrBatch: "Batch QR label printing", schedule: "Requirement form window" }[modal] || modal;
 }
