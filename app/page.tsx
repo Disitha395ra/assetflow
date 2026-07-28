@@ -122,41 +122,6 @@ const departments = [
   "R & D Dept",
 ];
 
-const demoEmployees: Employee[] = [
-  { id: "e1", empNo: "EMP-0142", name: "Nethmi Perera", email: "nethmi@company.lk", department: "HR Dept", designation: "HR Executive", status: "Active" },
-  { id: "e2", empNo: "EMP-0098", name: "Kasun Silva", email: "kasun@company.lk", department: "IT Dept", designation: "Systems Engineer", status: "Active" },
-  { id: "e3", empNo: "EMP-0217", name: "Shehani Fernando", email: "shehani@company.lk", department: "Marketing Dept", designation: "Brand Executive", status: "Active" },
-  { id: "e4", empNo: "EMP-0065", name: "Imran Ahamed", email: "imran@company.lk", department: "Finance Dept", designation: "Accountant", status: "Active" },
-  { id: "e5", empNo: "EMP-0184", name: "Tharindu Jayasekara", email: "tharindu@company.lk", department: "EEE Dept", designation: "Lecturer", status: "Active" },
-  { id: "e6", empNo: "EMP-0031", name: "Ayesha Wijesinghe", email: "ayesha@company.lk", department: "Registrar Dept", designation: "Senior Executive", status: "Active" },
-];
-
-const demoAssets: Asset[] = [
-  { id: "a1", code: "IT-LAP-0048", name: "Dell Latitude 5440", category: "IT Asset", type: "Laptop", brand: "Dell", model: "Latitude 5440", serial: "DL5440-SL-8842", status: "Assigned", employeeId: "e1", condition: "Good", details: "Intel Core i5 13th Gen · 16 GB RAM · 512 GB SSD", updatedAt: "2026-07-26" },
-  { id: "a2", code: "IT-MON-0021", name: "Dell 24” Monitor", category: "IT Asset", type: "Monitor", brand: "Dell", model: "P2422H", serial: "MON-P24-1298", status: "Available", condition: "Excellent", details: "24 inch · Full HD · DisplayPort", updatedAt: "2026-07-24" },
-  { id: "a3", code: "IT-PHN-0014", name: "Samsung Galaxy A55", category: "IT Asset", type: "Mobile Phone", brand: "Samsung", model: "Galaxy A55", serial: "RF8XA2104LK", status: "Assigned", employeeId: "e3", condition: "Good", details: "128 GB · Dual SIM · Company SIM 077 456 2189", updatedAt: "2026-07-20" },
-  { id: "a4", code: "NIT-CHR-0112", name: "Ergonomic Office Chair", category: "Non-IT Asset", type: "Computer Chair", brand: "Damro", model: "Ergo Pro", serial: "CHR-ER-0112", status: "Assigned", employeeId: "e4", condition: "Good", details: "Black mesh · Adjustable lumbar support", updatedAt: "2026-07-18" },
-  { id: "a5", code: "IT-HDS-0037", name: "Jabra Evolve 20", category: "IT Asset", type: "Headset", brand: "Jabra", model: "Evolve 20", serial: "JB-E20-7341", status: "In repair", employeeId: "e2", condition: "Repair", details: "USB headset · Microphone cable issue", updatedAt: "2026-07-27" },
-  { id: "a6", code: "IT-BAG-0064", name: "Targus Laptop Bag", category: "IT Asset", type: "Laptop Bag", brand: "Targus", model: "CitySmart", serial: "TG-CS-0064", status: "Available", condition: "Good", details: "15.6 inch · Black", updatedAt: "2026-07-11" },
-  { id: "a7", code: "IT-MOU-0081", name: "Logitech M90 Mouse", category: "IT Asset", type: "Mouse", brand: "Logitech", model: "M90", serial: "LG-M90-0081", status: "Assigned", employeeId: "e1", condition: "Good", details: "USB optical mouse", updatedAt: "2026-07-26" },
-  { id: "a8", code: "NIT-TBL-0033", name: "Office Workstation", category: "Non-IT Asset", type: "Computer Table", brand: "Local", model: "L-Desk", serial: "TBL-LD-0033", status: "Available", condition: "Good", details: "Walnut finish · 150 × 75 cm", updatedAt: "2026-07-05" },
-];
-
-const demoMovements: Movement[] = [
-  { id: "m1", assetId: "a1", employeeId: "e1", type: "Assigned", date: "2026-01-08", note: "Issued with charger and laptop bag" },
-  { id: "m2", assetId: "a1", employeeId: "e2", type: "Returned", date: "2025-12-22", note: "Returned in good condition" },
-  { id: "m3", assetId: "a1", employeeId: "e2", type: "Assigned", date: "2024-11-04", note: "New employee allocation" },
-  { id: "m4", assetId: "a5", employeeId: "e2", type: "Repair", date: "2026-07-27", note: "Microphone cable intermittently disconnects" },
-  { id: "m5", assetId: "a3", employeeId: "e3", type: "Assigned", date: "2026-03-12", note: "Issued with company SIM" },
-];
-
-const demoRequests: RequestRow[] = [
-  { id: "r1", department: "HR Dept", item: "Ergonomic office chair", quantity: 4, neededDate: "2026-09-15", reason: "Four new employees joining in September", status: "Pending" },
-  { id: "r2", department: "EEE Dept", item: "24” Monitor", quantity: 3, neededDate: "2026-09-05", reason: "New electronics simulation lab workstations", status: "Approved" },
-  { id: "r3", department: "Marketing Dept", item: "Adobe Creative Cloud licence", quantity: 2, neededDate: "2026-08-30", reason: "Design team expansion", status: "Pending" },
-  { id: "r4", department: "Finance Dept", item: "Laptop", quantity: 1, neededDate: "2026-09-20", reason: "Replacement for end-of-life device", status: "Approved" },
-];
-
 const nav = [
   { name: "Dashboard" as View, icon: LayoutDashboard },
   { name: "Assets" as View, icon: Package },
@@ -180,22 +145,22 @@ function statusClass(status: string) {
 
 export default function Home() {
   const [view, setView] = useState<View>("Dashboard");
-  const [assets, setAssets] = useState<Asset[]>(demoAssets);
-  const [employees, setEmployees] = useState<Employee[]>(demoEmployees);
-  const [movements, setMovements] = useState<Movement[]>(demoMovements);
-  const [requests, setRequests] = useState<RequestRow[]>(demoRequests);
+  const [assets, setAssets] = useState<Asset[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [movements, setMovements] = useState<Movement[]>([]);
+  const [requests, setRequests] = useState<RequestRow[]>([]);
   const [adminState, setAdminState] = useState<"loading" | "signed-out" | "admin" | "denied">(
     firebaseReady ? "loading" : "admin",
   );
   const [signedInEmail, setSignedInEmail] = useState("");
   const [requirementWindow, setRequirementWindow] = useState<RequirementWindowRecord>({
     id: "requirement-window",
-    title: "August–September department requirements",
-    slug: "aug-sep-2026",
-    opensAt: "2026-07-28T08:00",
+    title: "Next department requirements",
+    slug: "next-requirements",
+    opensAt: "2026-07-29T08:00",
     closesAt: "2026-08-31T17:00",
-    isOpen: true,
-    periodLabel: "August–September 2026",
+    isOpen: false,
+    periodLabel: "Next planning period",
   });
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
@@ -453,20 +418,21 @@ function Dashboard({ assets, requests, movements, employeeMap, assetMap, onView,
   const available = assets.filter((asset) => asset.status === "Available").length;
   return (
     <>
-      <PageHead eyebrow="TUESDAY, 28 JULY 2026" title="Good evening, Disitha" description="Here’s what’s happening with your company assets today.">
+      <PageHead eyebrow={new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).toUpperCase()} title="Welcome to AssetFlow" description="Your live company asset register is ready. Add employees and assets to begin.">
         <button className="button button-secondary" onClick={onAssign}><ArrowLeftRight size={17} />Assign assets</button>
         <button className="button button-primary" onClick={onAddAsset}><Plus size={17} />Add asset</button>
       </PageHead>
       <div className="metric-grid">
-        <Metric icon={Package} label="Total assets" value={assets.length.toString()} change="+12 this month" tone="violet" />
-        <Metric icon={Users} label="Assigned" value={assigned.toString()} change={`${Math.round((assigned / assets.length) * 100)}% utilisation`} tone="blue" />
+        <Metric icon={Package} label="Total assets" value={assets.length.toString()} change="Live asset register" tone="violet" />
+        <Metric icon={Users} label="Assigned" value={assigned.toString()} change={`${assets.length ? Math.round((assigned / assets.length) * 100) : 0}% utilisation`} tone="blue" />
         <Metric icon={ClipboardCheck} label="Available stock" value={available.toString()} change="Ready to assign" tone="green" />
-        <Metric icon={Wrench} label="Needs attention" value={assets.filter((asset) => asset.status === "In repair").length.toString()} change="1 repair overdue" tone="orange" />
+        <Metric icon={Wrench} label="Needs attention" value={assets.filter((asset) => asset.status === "In repair").length.toString()} change="Items currently in repair" tone="orange" />
       </div>
       <div className="dashboard-grid">
         <section className="panel activity-panel">
           <PanelHead title="Recent activity" subtitle="Latest asset movements across the company" action="View all" onClick={() => onView("Movements")} />
           <div className="activity-list">
+            {movements.length === 0 && <div className="empty-panel"><History size={20} /><strong>No movements yet</strong><span>Assignments and returns will appear here.</span></div>}
             {movements.slice(0, 5).map((movement) => (
               <div className="activity-row" key={movement.id}>
                 <div className={`activity-icon activity-${movement.type.toLowerCase()}`}>{movement.type === "Assigned" ? <ArrowLeftRight size={17} /> : movement.type === "Repair" ? <Wrench size={17} /> : <RotateCcw size={17} />}</div>
@@ -492,8 +458,9 @@ function Dashboard({ assets, requests, movements, employeeMap, assetMap, onView,
           <AssetTable assets={assets.slice(0, 5)} employeeMap={employeeMap} onAsset={onAsset} compact />
         </section>
         <section className="panel request-panel">
-          <PanelHead title="Upcoming requirements" subtitle="Current collection window · closes 31 Aug" action={`${requests.filter((r) => r.status === "Pending").length} pending`} onClick={() => onView("Requirements")} />
+          <PanelHead title="Upcoming requirements" subtitle="Department planning submissions" action={`${requests.filter((r) => r.status === "Pending").length} pending`} onClick={() => onView("Requirements")} />
           <div className="request-list">
+            {requests.length === 0 && <div className="empty-panel"><CalendarClock size={20} /><strong>No requirements yet</strong><span>Open a collection window when you are ready.</span></div>}
             {requests.slice(0, 4).map((request) => <div key={request.id}><span className="dept-badge">{request.department.split(" ")[0]}</span><div><strong>{request.quantity} × {request.item}</strong><small>{request.department} · Need by {new Date(request.neededDate).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</small></div><span className={statusClass(request.status)}>{request.status}</span></div>)}
           </div>
         </section>

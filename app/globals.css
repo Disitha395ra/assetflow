@@ -237,6 +237,9 @@ select.status { appearance: none; cursor: pointer; padding-right: 8px; }
 .owner-card small { color: #8b919d; font-size: 8px; margin: 3px 0; }
 .owner-card a { color: #6543df; font-size: 8px; text-decoration: none; }
 .empty-owner { background: #f2faf6; border: 1px dashed #b8e2ca; color: #308359; padding: 12px; border-radius: 9px; display: flex; align-items: center; gap: 9px; font-size: 9px; }
+.empty-panel { min-height: 104px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #8a8f9c; text-align: center; padding: 20px; }
+.empty-panel strong { color: #424754; font-size: 11px; }
+.empty-panel span { font-size: 9px; }
 .qr-section { display: flex; align-items: center; gap: 18px; }
 .qr-section > div { flex: 1; }
 .qr-section p { color: var(--muted); font-size: 9px; line-height: 1.55; }
