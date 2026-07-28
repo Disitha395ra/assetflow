@@ -16,13 +16,11 @@ export async function generateMetadata(): Promise<Metadata> {
     openGraph: {
       title: "AssetFlow",
       description: "Every asset. One clear record.",
-      images: [{ url: `${base}/og.png`, width: 1732, height: 908, alt: "AssetFlow company asset management" }],
     },
     twitter: {
-      card: "summary_large_image",
+      card: "summary",
       title: "AssetFlow",
       description: "Every asset. One clear record.",
-      images: [`${base}/og.png`],
     },
   };
 }
