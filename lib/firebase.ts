@@ -97,10 +97,20 @@ export type RequirementWindowRecord = {
   periodLabel: string;
 };
 
+export const DEFAULT_REQUIREMENT_WINDOW: RequirementWindowRecord = {
+  id: "requirement-window",
+  title: "Next department requirements",
+  slug: "next-requirements",
+  opensAt: "2026-07-29T08:00",
+  closesAt: "2026-08-31T17:00",
+  isOpen: false,
+  periodLabel: "Next planning period",
+};
+
 export async function getRequirementWindow() {
-  if (!db) return null;
+  if (!db) return DEFAULT_REQUIREMENT_WINDOW;
   const snapshot = await getDoc(doc(db, "settings", "requirement-window"));
-  if (!snapshot.exists()) return null;
+  if (!snapshot.exists()) return DEFAULT_REQUIREMENT_WINDOW;
   const data = snapshot.data();
   const toInputDate = (value: unknown) =>
     value instanceof Timestamp
