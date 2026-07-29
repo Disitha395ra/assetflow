@@ -44,6 +44,6 @@ test("supports custom departments, employee editing and type-specific asset fiel
   assert.match(catalog, /Storage capacity/);
   assert.match(catalog, /Processor/);
   assert.match(catalog, /Wired USB/);
-  assert.match(requirementPage, /settings", "departments"/);
+  assert.match(requirementPage, /config\.departments/);
   assert.match(rules, /match \/settings\/departments/);
 });
