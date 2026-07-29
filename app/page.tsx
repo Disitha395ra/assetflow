@@ -43,7 +43,6 @@ import {
   ADMIN_EMAIL,
   DEFAULT_REQUIREMENT_WINDOW,
   firebaseReady,
-  getRecord,
   getRequirementWindow,
   saveRecord,
   saveRequirementWindow,
@@ -104,10 +103,6 @@ type RequestRow = {
   requesterName?: string;
   requesterEmail?: string;
   createdAt?: string;
-};
-type DepartmentSettings = {
-  id: "departments";
-  items: string[];
 };
 type View =
   | "Dashboard"
@@ -184,9 +179,10 @@ export default function Home() {
       watchCollection<Movement>("movements", setMovements),
       watchCollection<RequestRow>("requirements", setRequests),
     ];
-    getRequirementWindow().then((config) => config && setRequirementWindow(config));
-    getRecord<DepartmentSettings>("settings", "departments").then((record) => {
-      if (record?.items?.length) setDepartments(record.items);
+    getRequirementWindow().then((config) => {
+      if (!config) return;
+      setRequirementWindow(config);
+      if (config.departments?.length) setDepartments(config.departments);
     });
     return () => cleanups.forEach((cleanup) => cleanup());
   }, [adminState]);
@@ -406,7 +402,7 @@ export default function Home() {
           {modal === "asset" && <AssetForm onSave={async (asset) => { setAssets((rows) => [asset, ...rows]); await saveRecord("assets", asset); setModal(null); flash("Asset added to inventory"); }} />}
           {modal === "employee" && <EmployeeForm departments={departments} onSave={async (employee) => { setEmployees((rows) => [employee, ...rows]); await saveRecord("employees", employee); setModal(null); flash("Employee added"); }} />}
           {modal === "employeeEdit" && editingEmployee && <EmployeeForm departments={departments} initial={editingEmployee} onSave={async (employee) => { setEmployees((rows) => rows.map((row) => row.id === employee.id ? employee : row)); await saveRecord("employees", employee); setEditingEmployee(null); setModal(null); flash("Employee details updated"); }} />}
-          {modal === "departments" && <DepartmentManager departments={departments} employees={employees} onSave={async (items) => { setDepartments(items); await saveRecord<DepartmentSettings>("settings", { id: "departments", items }); setModal(null); flash("Department list updated"); }} />}
+          {modal === "departments" && <DepartmentManager departments={departments} employees={employees} onSave={async (items) => { const nextWindow = { ...requirementWindow, departments: items }; setDepartments(items); setRequirementWindow(nextWindow); await saveRequirementWindow(nextWindow); setModal(null); flash("Department list updated"); }} />}
           {modal === "assign" && <AssignForm assets={assets} employees={employees} onSave={async (assetIds, employeeId) => { const employee = employeeMap[employeeId]; for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Assigned", employeeId, custodianName: employee?.name, custodianDepartment: employee?.department, updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: "Assigned", date: today(), note: "Asset issued through AssetFlow" }); } openDocument("Asset Handover", employeeId, assetIds); flash(`${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned — handover document ready`); }} />}
           {modal === "return" && <ReturnForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, clearance) => { for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Available", employeeId: undefined, custodianName: undefined, custodianDepartment: undefined, condition: "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: clearance ? "Cleared" : "Returned", date: today(), note: clearance ? "Returned during employee clearance" : "Returned to IT stock" }); } openDocument(clearance ? "Employee Clearance" : "Asset Return", employeeId, assetIds); flash(clearance ? "Clearance report ready" : "Return document ready"); }} />}
           {modal === "repair" && <RepairForm assets={assets} onSave={async (assetId, action, note) => { const asset = assets.find((row) => row.id === assetId); if (!asset) return; const nextStatus: AssetStatus = action === "start" ? "In repair" : asset.employeeId ? "Assigned" : "Available"; await updateAsset({ ...asset, status: nextStatus, condition: action === "start" ? "Repair" : "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId: asset.employeeId || "", type: "Repair", date: today(), note: `${action === "start" ? "Sent for repair" : "Repair completed"}: ${note}` }); setModal(null); flash(action === "start" ? "Repair record started" : "Repair completion recorded"); }} />}
