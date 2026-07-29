@@ -95,6 +95,7 @@ export type RequirementWindowRecord = {
   closesAt: string;
   isOpen: boolean;
   periodLabel: string;
+  departments?: string[];
 };
 
 export const DEFAULT_REQUIREMENT_WINDOW: RequirementWindowRecord = {
