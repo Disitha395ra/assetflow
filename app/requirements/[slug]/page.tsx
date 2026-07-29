@@ -13,7 +13,6 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   firebaseReady,
-  getRecord,
   getRequirementWindow,
   saveRecord,
   type RequirementWindowRecord,
@@ -34,14 +33,11 @@ export default function PublicRequirementForm() {
   });
 
   useEffect(() => {
-    Promise.all([
-      getRequirementWindow(),
-      getRecord<{ id: string; items: string[] }>("settings", "departments"),
-    ]).then(([config, departmentSettings]) => {
+    getRequirementWindow().then((config) => {
       setWindowConfig(config);
-      if (departmentSettings?.items?.length) {
-        setDepartments(departmentSettings.items);
-        setForm((current) => ({ ...current, department: departmentSettings.items[0] }));
+      if (config?.departments?.length) {
+        setDepartments(config.departments);
+        setForm((current) => ({ ...current, department: config.departments![0] }));
       }
       setLoading(false);
     });
