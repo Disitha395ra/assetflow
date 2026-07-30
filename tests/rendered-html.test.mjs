@@ -47,3 +47,37 @@ test("supports custom departments, employee editing and type-specific asset fiel
   assert.match(requirementPage, /config\.departments/);
   assert.match(rules, /match \/settings\/departments/);
 });
+
+test("preserves and safely migrates legacy department settings", async () => {
+  const firebase = await readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8");
+
+  assert.match(firebase, /doc\(db, "settings", "departments"\)/);
+  assert.match(firebase, /legacySnapshot\.data\(\)\?\.items/);
+  assert.match(firebase, /currentDepartments\.length \? currentDepartments : legacyDepartments/);
+  assert.match(firebase, /runTransaction/);
+  assert.match(firebase, /if \(!latestDepartments\.length\)/);
+  assert.match(firebase, /\{ merge: true \}/);
+});
+
+test("uses constrained Chair, Table and Other inputs for Non-IT assets", async () => {
+  const [page, catalog] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/catalog.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(catalog, /"Non-IT Asset": \[\s*"Chair",\s*"Table",\s*"Other"/);
+  for (const option of [
+    "Alpha (60*120)",
+    "Alpha CT-03 (135*80)",
+    "Damro (135*70)",
+    "KWT022 (75*152)",
+    "OCM-043",
+    "OCL-018",
+    "OCH-014",
+  ]) {
+    assert.ok(catalog.includes(`"${option}"`), `missing Non-IT option: ${option}`);
+  }
+  assert.match(page, /Select \{form\.type\.toLowerCase\(\)\} model/);
+  assert.match(page, /Enter the other item type/);
+  assert.match(page, /type: event\.target\.value, model: ""/);
+});

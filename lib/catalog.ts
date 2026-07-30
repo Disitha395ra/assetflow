@@ -26,10 +26,23 @@ export const ASSET_TYPES = {
     "Other",
   ],
   "Non-IT Asset": [
-    "Computer Chair",
-    "Computer Table",
-    "Whiteboard",
+    "Chair",
+    "Table",
     "Other",
+  ],
+} as const;
+
+export const NON_IT_ITEM_MODELS = {
+  Table: [
+    "Alpha (60*120)",
+    "Alpha CT-03 (135*80)",
+    "Damro (135*70)",
+    "KWT022 (75*152)",
+  ],
+  Chair: [
+    "OCM-043",
+    "OCL-018",
+    "OCH-014",
   ],
 } as const;
 
@@ -73,14 +86,5 @@ export const ASSET_SPEC_FIELDS: Record<string, AssetSpecField[]> = {
   ],
   "Laptop Bag": [
     { key: "bagSize", label: "Laptop size", options: ["13 inch", "14 inch", "15.6 inch", "16 inch", "17 inch", "Universal"] },
-  ],
-  "Computer Chair": [
-    { key: "chairType", label: "Chair type", options: ["Task chair", "Executive chair", "Visitor chair", "Ergonomic chair", "Other"] },
-  ],
-  "Computer Table": [
-    { key: "dimensions", label: "Dimensions", placeholder: "e.g. 120 × 60 cm" },
-  ],
-  Whiteboard: [
-    { key: "dimensions", label: "Dimensions", placeholder: "e.g. 120 × 90 cm" },
   ],
 };

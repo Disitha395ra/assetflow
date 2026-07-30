@@ -14,6 +14,7 @@ import {
   getDoc,
   getFirestore,
   onSnapshot,
+  runTransaction,
   setDoc,
   Timestamp,
 } from "firebase/firestore";
@@ -110,9 +111,33 @@ export const DEFAULT_REQUIREMENT_WINDOW: RequirementWindowRecord = {
 
 export async function getRequirementWindow() {
   if (!db) return DEFAULT_REQUIREMENT_WINDOW;
-  const snapshot = await getDoc(doc(db, "settings", "requirement-window"));
+  const windowRef = doc(db, "settings", "requirement-window");
+  const legacyDepartmentsRef = doc(db, "settings", "departments");
+  const [snapshot, legacySnapshot] = await Promise.all([
+    getDoc(windowRef),
+    getDoc(legacyDepartmentsRef),
+  ]);
   if (!snapshot.exists()) return DEFAULT_REQUIREMENT_WINDOW;
   const data = snapshot.data();
+  const cleanDepartments = (value: unknown) =>
+    Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
+      : [];
+  const currentDepartments = cleanDepartments(data.departments);
+  const legacyDepartments = cleanDepartments(legacySnapshot.data()?.items);
+  const departments = currentDepartments.length ? currentDepartments : legacyDepartments;
+
+  // Recheck inside the transaction so legacy data cannot overwrite a newer list.
+  if (!currentDepartments.length && legacyDepartments.length && auth?.currentUser?.email === ADMIN_EMAIL) {
+    await runTransaction(db, async (transaction) => {
+      const latestSnapshot = await transaction.get(windowRef);
+      const latestDepartments = cleanDepartments(latestSnapshot.data()?.departments);
+      if (!latestDepartments.length) {
+        transaction.set(windowRef, { departments: legacyDepartments }, { merge: true });
+      }
+    });
+  }
+
   const toInputDate = (value: unknown) =>
     value instanceof Timestamp
       ? value.toDate().toISOString().slice(0, 16)
@@ -122,6 +147,7 @@ export async function getRequirementWindow() {
     id: "requirement-window",
     opensAt: toInputDate(data.opensAt),
     closesAt: toInputDate(data.closesAt),
+    ...(departments.length ? { departments } : {}),
   } as RequirementWindowRecord;
 }
 

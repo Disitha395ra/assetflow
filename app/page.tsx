@@ -52,7 +52,7 @@ import {
   watchCollection,
   type RequirementWindowRecord,
 } from "@/lib/firebase";
-import { ASSET_SPEC_FIELDS, ASSET_TYPES, DEFAULT_DEPARTMENTS } from "@/lib/catalog";
+import { ASSET_SPEC_FIELDS, ASSET_TYPES, DEFAULT_DEPARTMENTS, NON_IT_ITEM_MODELS } from "@/lib/catalog";
 
 type AssetStatus = "Available" | "Assigned" | "In repair" | "Retired";
 type Asset = {
@@ -583,12 +583,21 @@ function AssetForm({ onSave }: { onSave: (asset: Asset) => void }) {
   const field = (key: keyof typeof form) => ({ value: form[key], onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm({ ...form, [key]: event.target.value }) });
   const category = form.category as keyof typeof ASSET_TYPES;
   const dynamicFields = ASSET_SPEC_FIELDS[form.type] ?? [];
+  const nonItModels = form.category === "Non-IT Asset" && form.type !== "Other"
+    ? NON_IT_ITEM_MODELS[form.type as keyof typeof NON_IT_ITEM_MODELS]
+    : null;
   return <form className="form-grid" onSubmit={(event) => { event.preventDefault(); const prefix = form.category === "IT Asset" ? "IT" : "NIT"; onSave({ id: crypto.randomUUID(), code: `${prefix}-${form.type.slice(0, 3).toUpperCase()}-${String(Date.now()).slice(-4)}`, ...form, specs, category: form.category as Asset["category"], status: "Available", updatedAt: today() }); }}>
-    <label>Asset category<select value={form.category} onChange={(event) => { const nextCategory = event.target.value as keyof typeof ASSET_TYPES; setForm({ ...form, category: nextCategory, type: ASSET_TYPES[nextCategory][0] }); setSpecs({}); }}><option>IT Asset</option><option>Non-IT Asset</option></select></label>
-    <label>Item type<select value={form.type} onChange={(event) => { setForm({ ...form, type: event.target.value }); setSpecs({}); }}>{ASSET_TYPES[category].map((type) => <option key={type}>{type}</option>)}</select></label>
+    <label>Asset category<select value={form.category} onChange={(event) => { const nextCategory = event.target.value as keyof typeof ASSET_TYPES; setForm({ ...form, category: nextCategory, type: ASSET_TYPES[nextCategory][0], model: "" }); setSpecs({}); }}><option>IT Asset</option><option>Non-IT Asset</option></select></label>
+    <label>Item type<select value={form.type} onChange={(event) => { setForm({ ...form, type: event.target.value, model: "" }); setSpecs({}); }}>{ASSET_TYPES[category].map((type) => <option key={type}>{type}</option>)}</select></label>
     <label className="full">Display name<input required placeholder="e.g. Lenovo ThinkPad E14" {...field("name")} /></label>
     <label>Brand<input required placeholder="Lenovo" {...field("brand")} /></label>
-    <label>Model<input required placeholder="ThinkPad E14 Gen 5" {...field("model")} /></label>
+    {form.category === "Non-IT Asset"
+      ? <label>{form.type === "Other" ? "Other item" : `${form.type} model`}
+        {nonItModels
+          ? <select required {...field("model")}><option value="">Select {form.type.toLowerCase()} model</option>{nonItModels.map((model) => <option key={model}>{model}</option>)}</select>
+          : <input required placeholder="Enter the other item type" {...field("model")} />}
+      </label>
+      : <label>Model<input required placeholder="ThinkPad E14 Gen 5" {...field("model")} /></label>}
     <label className="full">Serial number<input required placeholder="Manufacturer or company serial number" {...field("serial")} /></label>
     {dynamicFields.length > 0 && <div className="asset-spec-heading full"><strong>{form.type} specifications</strong><span>Fields change automatically for the selected asset type.</span></div>}
     {dynamicFields.map((spec) => <label key={spec.key}>{spec.label}{spec.options ? <select required value={specs[spec.key] ?? ""} onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })}><option value="">Select {spec.label.toLowerCase()}</option>{spec.options.map((option) => <option key={option}>{option}</option>)}</select> : <input required value={specs[spec.key] ?? ""} placeholder={spec.placeholder} onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })} />}</label>)}
