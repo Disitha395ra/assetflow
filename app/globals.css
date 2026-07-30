@@ -66,6 +66,9 @@ button { cursor: pointer; }
 .button-primary:hover { background: var(--primary-dark); }
 .button-primary:disabled { opacity: .45; cursor: not-allowed; }
 .button-secondary { color: #4c5260; background: white; border-color: #dddfe5; }
+.button-danger { color: #b42318; background: #fff5f4; border-color: #f4c7c3; }
+.button-danger:hover { background: #fee9e7; }
+.button-danger:disabled { opacity: .45; cursor: not-allowed; }
 
 .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 18px; }
 .metric { background: white; border: 1px solid var(--line); border-radius: 13px; padding: 17px; box-shadow: 0 2px 4px #17253b05; }

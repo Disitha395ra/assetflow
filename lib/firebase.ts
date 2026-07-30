@@ -17,6 +17,7 @@ import {
   runTransaction,
   setDoc,
   Timestamp,
+  writeBatch,
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -80,6 +81,17 @@ export async function saveRecord<T extends { id: string }>(
 export async function removeRecord(name: string, id: string) {
   if (!db) return;
   await deleteDoc(doc(db, name, id));
+}
+
+export async function deleteAssetRecord(assetId: string, movementIds: string[]) {
+  if (!db) return;
+  if (movementIds.length > 498) {
+    throw new Error("This asset has too many lifecycle records to delete in one operation.");
+  }
+  const batch = writeBatch(db);
+  batch.delete(doc(db, "assets", assetId));
+  movementIds.forEach((movementId) => batch.delete(doc(db, "movements", movementId)));
+  await batch.commit();
 }
 
 export async function getRecord<T>(name: string, id: string) {
