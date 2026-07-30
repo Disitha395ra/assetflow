@@ -52,6 +52,7 @@ import {
   signOutAdmin,
   watchAuth,
   watchCollection,
+  watchRequirementWindow,
   type RequirementWindowRecord,
 } from "@/lib/firebase";
 import { ASSET_SPEC_FIELDS, ASSET_TYPES, DEFAULT_DEPARTMENTS, NON_IT_ITEM_MODELS } from "@/lib/catalog";
@@ -181,10 +182,12 @@ export default function Home() {
       watchCollection<Employee>("employees", setEmployees),
       watchCollection<Movement>("movements", setMovements),
       watchCollection<RequestRow>("requirements", setRequests),
+      watchRequirementWindow((config) => {
+        setRequirementWindow(config);
+        if (config.departments?.length) setDepartments(config.departments);
+      }),
     ];
     getRequirementWindow().then((config) => {
-      if (!config) return;
-      setRequirementWindow(config);
       if (config.departments?.length) setDepartments(config.departments);
     });
     return () => cleanups.forEach((cleanup) => cleanup());
@@ -198,11 +201,19 @@ export default function Home() {
     () => Object.fromEntries(assets.map((item) => [item.id, item])),
     [assets],
   );
+  const employeeDepartments = useMemo(() => {
+    const options: string[] = [];
+    [...departments, ...employees.map((employee) => employee.department)].forEach((value) => {
+      const item = value.trim();
+      if (item && !options.some((option) => option.toLowerCase() === item.toLowerCase())) options.push(item);
+    });
+    return options;
+  }, [departments, employees]);
 
   const filteredAssets = assets.filter((asset) => {
     const needle = search.toLowerCase();
     return (
-      (category === "All" || asset.category === category) &&
+      (category === "All" || (category === "Available" ? asset.status === "Available" : asset.category === category)) &&
       [asset.code, asset.name, asset.serial, asset.brand, asset.type]
         .join(" ")
         .toLowerCase()
@@ -213,7 +224,7 @@ export default function Home() {
   const filteredEmployees = employees.filter((employee) => {
     const needle = search.toLowerCase();
     return (
-      (department === "All" || employee.department === department) &&
+      (department === "All" || employee.department.trim().toLowerCase() === department.toLowerCase()) &&
       [employee.name, employee.empNo, employee.department, employee.designation]
         .join(" ")
         .toLowerCase()
@@ -378,6 +389,7 @@ export default function Home() {
           {view === "Assets" && (
             <AssetsView
               assets={filteredAssets}
+              allAssets={assets}
               employeeMap={employeeMap}
               category={category}
               setCategory={setCategory}
@@ -393,7 +405,7 @@ export default function Home() {
               assets={assets}
               department={department}
               setDepartment={setDepartment}
-              departments={departments}
+              departments={employeeDepartments}
               onAdd={() => setModal("employee")}
               onEdit={(employee) => { setEditingEmployee(employee); setModal("employeeEdit"); }}
               onDocument={openDocument}
@@ -416,8 +428,8 @@ export default function Home() {
         <Modal title={modalTitle(modal)} wide={modal === "document"} onClose={() => setModal(null)}>
           {modal === "asset" && <AssetForm onSave={async (asset) => { setAssets((rows) => [asset, ...rows]); await saveRecord("assets", asset); setModal(null); flash("Asset added to inventory"); }} />}
           {modal === "assetEdit" && editingAsset && <AssetForm initial={editingAsset} onSave={async (asset) => { await saveRecord("assets", asset); setAssets((rows) => rows.map((row) => row.id === asset.id ? asset : row)); setEditingAsset(null); setModal(null); setSelectedAsset(asset); flash("Asset details updated"); }} />}
-          {modal === "employee" && <EmployeeForm departments={departments} onSave={async (employee) => { await saveRecord("employees", employee); setEmployees((rows) => [employee, ...rows]); setDepartment(employee.department); setModal(null); flash("Employee added"); }} />}
-          {modal === "employeeEdit" && editingEmployee && <EmployeeForm departments={departments} initial={editingEmployee} onSave={async (employee) => { await saveRecord("employees", employee); setEmployees((rows) => rows.map((row) => row.id === employee.id ? employee : row)); setDepartment(employee.department); setEditingEmployee(null); setModal(null); flash("Employee details updated"); }} />}
+          {modal === "employee" && <EmployeeForm departments={employeeDepartments} onSave={async (employee) => { await saveRecord("employees", employee); setEmployees((rows) => [employee, ...rows]); setDepartment(employee.department); setModal(null); flash("Employee added"); }} />}
+          {modal === "employeeEdit" && editingEmployee && <EmployeeForm departments={employeeDepartments} initial={editingEmployee} onSave={async (employee) => { await saveRecord("employees", employee); setEmployees((rows) => rows.map((row) => row.id === employee.id ? employee : row)); setDepartment(employee.department); setEditingEmployee(null); setModal(null); flash("Employee details updated"); }} />}
           {modal === "departments" && <DepartmentManager departments={departments} employees={employees} onSave={async (items) => { const nextWindow = { ...requirementWindow, departments: items }; await saveRequirementWindow(nextWindow); setDepartments(items); setRequirementWindow(nextWindow); setModal(null); flash("Department list updated"); }} />}
           {modal === "assign" && <AssignForm assets={assets} employees={employees} onSave={async (assetIds, employeeId) => { const employee = employeeMap[employeeId]; for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Assigned", employeeId, custodianName: employee?.name, custodianDepartment: employee?.department, updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: "Assigned", date: today(), note: "Asset issued through AssetFlow" }); } openDocument("Asset Handover", employeeId, assetIds); flash(`${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned — handover document ready`); }} />}
           {modal === "return" && <ReturnForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, clearance) => { for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Available", employeeId: undefined, custodianName: undefined, custodianDepartment: undefined, condition: "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: clearance ? "Cleared" : "Returned", date: today(), note: clearance ? "Returned during employee clearance" : "Returned to IT stock" }); } openDocument(clearance ? "Employee Clearance" : "Asset Return", employeeId, assetIds); flash(clearance ? "Clearance report ready" : "Return document ready"); }} />}
@@ -491,7 +503,13 @@ function Dashboard({ assets, requests, movements, employeeMap, assetMap, onView,
   );
 }
 
-function AssetsView({ assets, employeeMap, category, setCategory, onAdd, onAsset, onExport, onQrBatch }: { assets: Asset[]; employeeMap: Record<string, Employee>; category: string; setCategory: (value: string) => void; onAdd: () => void; onAsset: (asset: Asset) => void; onExport: () => void; onQrBatch: () => void }) {
+function AssetsView({ assets, allAssets, employeeMap, category, setCategory, onAdd, onAsset, onExport, onQrBatch }: { assets: Asset[]; allAssets: Asset[]; employeeMap: Record<string, Employee>; category: string; setCategory: (value: string) => void; onAdd: () => void; onAsset: (asset: Asset) => void; onExport: () => void; onQrBatch: () => void }) {
+  const filters = [
+    { value: "All", label: "All items", count: allAssets.length },
+    { value: "Available", label: "Available items", count: allAssets.filter((asset) => asset.status === "Available").length },
+    { value: "IT Asset", label: "IT items", count: allAssets.filter((asset) => asset.category === "IT Asset").length },
+    { value: "Non-IT Asset", label: "Non-IT items", count: allAssets.filter((asset) => asset.category === "Non-IT Asset").length },
+  ];
   return (
     <>
       <PageHead eyebrow="INVENTORY" title="Assets" description="Track every IT and non-IT item, its condition, owner and complete history.">
@@ -500,7 +518,7 @@ function AssetsView({ assets, employeeMap, category, setCategory, onAdd, onAsset
         <button className="button button-primary" onClick={onAdd}><Plus size={17} />Add asset</button>
       </PageHead>
       <div className="filter-tabs">
-        {["All", "IT Asset", "Non-IT Asset"].map((item) => <button className={category === item ? "active" : ""} key={item} onClick={() => setCategory(item)}>{item}<span>{item === "All" ? assets.length : assets.filter((asset) => asset.category === item).length}</span></button>)}
+        {filters.map((filter) => <button className={category === filter.value ? "active" : ""} key={filter.value} onClick={() => setCategory(filter.value)}>{filter.label}<span>{filter.count}</span></button>)}
       </div>
       <section className="panel table-panel">
         <div className="table-toolbar"><div><strong>Asset register</strong><small>{assets.length} matching records</small></div><div className="legend"><span><i className="dot green" />Available</span><span><i className="dot blue" />Assigned</span><span><i className="dot orange" />Repair</span></div></div>

@@ -163,6 +163,30 @@ export async function getRequirementWindow() {
   } as RequirementWindowRecord;
 }
 
+export function watchRequirementWindow(callback: (value: RequirementWindowRecord) => void) {
+  if (!db) {
+    callback(DEFAULT_REQUIREMENT_WINDOW);
+    return () => undefined;
+  }
+  return onSnapshot(doc(db, "settings", "requirement-window"), (snapshot) => {
+    if (!snapshot.exists()) {
+      callback(DEFAULT_REQUIREMENT_WINDOW);
+      return;
+    }
+    const data = snapshot.data();
+    const toInputDate = (value: unknown) =>
+      value instanceof Timestamp
+        ? value.toDate().toISOString().slice(0, 16)
+        : String(value ?? "");
+    callback({
+      ...data,
+      id: "requirement-window",
+      opensAt: toInputDate(data.opensAt),
+      closesAt: toInputDate(data.closesAt),
+    } as RequirementWindowRecord);
+  });
+}
+
 export async function saveRequirementWindow(value: RequirementWindowRecord) {
   if (!db) return;
   await setDoc(doc(db, "settings", "requirement-window"), {

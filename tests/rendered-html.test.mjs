@@ -129,3 +129,23 @@ test("deletes assigned or unassigned assets and their lifecycle records atomical
   assert.match(firebase, /batch\.delete\(doc\(db, "movements", movementId\)\)/);
   assert.match(firebase, /await batch\.commit\(\)/);
 });
+
+test("keeps department filters synchronized and provides useful asset filters", async () => {
+  const [page, firebase] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /watchRequirementWindow\(\(config\) =>/);
+  assert.match(page, /const employeeDepartments = useMemo/);
+  assert.match(page, /\[\.\.\.departments, \.\.\.employees\.map\(\(employee\) => employee\.department\)\]/);
+  assert.match(page, /departments=\{employeeDepartments\}/);
+  assert.match(firebase, /export function watchRequirementWindow/);
+  assert.match(firebase, /onSnapshot\(doc\(db, "settings", "requirement-window"\)/);
+
+  assert.match(page, /\{ value: "Available", label: "Available items"/);
+  assert.match(page, /\{ value: "IT Asset", label: "IT items"/);
+  assert.match(page, /\{ value: "Non-IT Asset", label: "Non-IT items"/);
+  assert.match(page, /category === "Available" \? asset\.status === "Available"/);
+  assert.match(page, /allAssets=\{assets\}/);
+});
