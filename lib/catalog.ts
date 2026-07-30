@@ -43,6 +43,7 @@ export const NON_IT_ITEM_MODELS = {
     "OCM-043",
     "OCL-018",
     "OCH-014",
+    "Task Chair OCP-001",
   ],
 } as const;
 

@@ -74,6 +74,7 @@ test("uses constrained Chair, Table and Other inputs for Non-IT assets", async (
     "OCM-043",
     "OCL-018",
     "OCH-014",
+    "Task Chair OCP-001",
   ]) {
     assert.ok(catalog.includes(`"${option}"`), `missing Non-IT option: ${option}`);
   }
