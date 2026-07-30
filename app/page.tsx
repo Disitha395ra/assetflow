@@ -153,8 +153,9 @@ export default function Home() {
   const [category, setCategory] = useState("All");
   const [department, setDepartment] = useState("All");
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
-  const [modal, setModal] = useState<"asset" | "employee" | "employeeEdit" | "departments" | "assign" | "return" | "repair" | "request" | "document" | "qrBatch" | "schedule" | null>(null);
+  const [modal, setModal] = useState<"asset" | "assetEdit" | "employee" | "employeeEdit" | "departments" | "assign" | "return" | "repair" | "request" | "document" | "qrBatch" | "schedule" | null>(null);
   const [documentType, setDocumentType] = useState("Asset Handover");
   const [documentEmployeeId, setDocumentEmployeeId] = useState("");
   const [documentAssetIds, setDocumentAssetIds] = useState<string[]>([]);
@@ -396,10 +397,11 @@ export default function Home() {
         </div>
       </section>
 
-      {selectedAsset && <AssetDrawer asset={selectedAsset} employee={selectedAsset.employeeId ? employeeMap[selectedAsset.employeeId] : undefined} movements={movements.filter((row) => row.assetId === selectedAsset.id)} employeeMap={employeeMap} onClose={() => setSelectedAsset(null)} />}
+      {selectedAsset && <AssetDrawer asset={selectedAsset} employee={selectedAsset.employeeId ? employeeMap[selectedAsset.employeeId] : undefined} movements={movements.filter((row) => row.assetId === selectedAsset.id)} employeeMap={employeeMap} onEdit={() => { setEditingAsset(selectedAsset); setSelectedAsset(null); setModal("assetEdit"); }} onClose={() => setSelectedAsset(null)} />}
       {modal && (
         <Modal title={modalTitle(modal)} wide={modal === "document"} onClose={() => setModal(null)}>
           {modal === "asset" && <AssetForm onSave={async (asset) => { setAssets((rows) => [asset, ...rows]); await saveRecord("assets", asset); setModal(null); flash("Asset added to inventory"); }} />}
+          {modal === "assetEdit" && editingAsset && <AssetForm initial={editingAsset} onSave={async (asset) => { await saveRecord("assets", asset); setAssets((rows) => rows.map((row) => row.id === asset.id ? asset : row)); setEditingAsset(null); setModal(null); setSelectedAsset(asset); flash("Asset details updated"); }} />}
           {modal === "employee" && <EmployeeForm departments={departments} onSave={async (employee) => { await saveRecord("employees", employee); setEmployees((rows) => [employee, ...rows]); setDepartment(employee.department); setModal(null); flash("Employee added"); }} />}
           {modal === "employeeEdit" && editingEmployee && <EmployeeForm departments={departments} initial={editingEmployee} onSave={async (employee) => { await saveRecord("employees", employee); setEmployees((rows) => rows.map((row) => row.id === employee.id ? employee : row)); setDepartment(employee.department); setEditingEmployee(null); setModal(null); flash("Employee details updated"); }} />}
           {modal === "departments" && <DepartmentManager departments={departments} employees={employees} onSave={async (items) => { const nextWindow = { ...requirementWindow, departments: items }; await saveRequirementWindow(nextWindow); setDepartments(items); setRequirementWindow(nextWindow); setModal(null); flash("Department list updated"); }} />}
@@ -567,28 +569,34 @@ function AssetTable({ assets, employeeMap, onAsset, compact = false }: { assets:
   return <div className="responsive-table"><table><thead><tr><th>Asset</th><th>Category</th>{!compact && <th>Serial number</th>}<th>Assigned to</th><th>Status</th><th /></tr></thead><tbody>{assets.map((asset) => <tr key={asset.id} onClick={() => onAsset(asset)}><td><div className="asset-cell"><span>{asset.type === "Mobile Phone" ? <Smartphone size={18} /> : <Monitor size={18} />}</span><div><strong>{asset.name}</strong><small>{asset.code}</small></div></div></td><td><span className="category-label">{asset.category}</span></td>{!compact && <td><code>{asset.serial}</code></td>}<td>{asset.employeeId ? <div className="mini-person"><span>{initials(employeeMap[asset.employeeId]?.name || "")}</span><div><strong>{employeeMap[asset.employeeId]?.name}</strong><small>{employeeMap[asset.employeeId]?.department}</small></div></div> : <span className="muted">—</span>}</td><td><span className={statusClass(asset.status)}>{asset.status}</span></td><td><button className="row-action" aria-label={`View ${asset.name}`}>→</button></td></tr>)}</tbody></table></div>;
 }
 
-function AssetDrawer({ asset, employee, movements, employeeMap, onClose }: { asset: Asset; employee?: Employee; movements: Movement[]; employeeMap: Record<string, Employee>; onClose: () => void }) {
+function AssetDrawer({ asset, employee, movements, employeeMap, onEdit, onClose }: { asset: Asset; employee?: Employee; movements: Movement[]; employeeMap: Record<string, Employee>; onEdit: () => void; onClose: () => void }) {
   const [qr, setQr] = useState("");
   useEffect(() => { QRCode.toDataURL(`${window.location.origin}/asset/${asset.id}`, { width: 240, margin: 1, color: { dark: "#111827", light: "#ffffff" } }).then(setQr); }, [asset.id]);
-  return <><button className="drawer-backdrop" aria-label="Close asset details" onClick={onClose} /><aside className="drawer"><div className="drawer-head"><div><span>{asset.code}</span><h2>{asset.name}</h2></div><button className="icon-button" onClick={onClose}><X size={20} /></button></div><div className="drawer-body"><div className="asset-hero"><span className="asset-big-icon"><Monitor size={34} /></span><div><span className={statusClass(asset.status)}>{asset.status}</span><p>{asset.brand} · {asset.model}</p></div></div><section className="detail-section"><h3>Asset details</h3><div className="detail-grid"><label>Serial number<strong>{asset.serial}</strong></label><label>Condition<strong>{asset.condition}</strong></label><label>Category<strong>{asset.category}</strong></label><label>Type<strong>{asset.type}</strong></label>{Object.entries(asset.specs ?? {}).filter(([, value]) => value).map(([key, value]) => <label key={key}>{specLabel(key)}<strong>{value}</strong></label>)}</div><p className="spec-box">{asset.details || "No additional notes recorded."}</p></section><section className="detail-section"><h3>Current custodian</h3>{employee ? <div className="owner-card"><span>{initials(employee.name)}</span><div><strong>{employee.name}</strong><small>{employee.empNo} · {employee.department}</small><a href={`mailto:${employee.email}`}>{employee.email}</a></div></div> : <div className="empty-owner"><Package size={21} />Available in central stock</div>}</section><section className="detail-section qr-section"><div><h3>Live QR label</h3><p>Print and attach this code. Scanning always opens the latest asset record.</p><button className="button button-secondary" onClick={() => window.print()}><Printer size={16} />Print label</button></div>{qr && <img src={qr} alt={`QR code for ${asset.code}`} />}</section><section className="detail-section"><h3>History</h3><div className="mini-history">{movements.length ? movements.map((movement) => <div key={movement.id}><i /><div><strong>{movement.type}</strong><p>{employeeMap[movement.employeeId]?.name} · {movement.note}</p><small>{new Date(movement.date).toLocaleDateString("en-GB")}</small></div></div>) : <p className="muted">No previous movements.</p>}</div></section></div></aside></>;
+  return <><button className="drawer-backdrop" aria-label="Close asset details" onClick={onClose} /><aside className="drawer"><div className="drawer-head"><div><span>{asset.code}</span><h2>{asset.name}</h2></div><div className="drawer-head-actions"><button className="button button-secondary" onClick={onEdit}><Pencil size={14} />Edit asset</button><button className="icon-button" aria-label="Close asset details" onClick={onClose}><X size={20} /></button></div></div><div className="drawer-body"><div className="asset-hero"><span className="asset-big-icon"><Monitor size={34} /></span><div><span className={statusClass(asset.status)}>{asset.status}</span><p>{asset.brand} · {asset.model}</p></div></div><section className="detail-section"><h3>Asset details</h3><div className="detail-grid"><label>Serial number<strong>{asset.serial}</strong></label><label>Condition<strong>{asset.condition}</strong></label><label>Category<strong>{asset.category}</strong></label><label>Type<strong>{asset.type}</strong></label>{Object.entries(asset.specs ?? {}).filter(([, value]) => value).map(([key, value]) => <label key={key}>{specLabel(key)}<strong>{value}</strong></label>)}</div><p className="spec-box">{asset.details || "No additional notes recorded."}</p></section><section className="detail-section"><h3>Current custodian</h3>{employee ? <div className="owner-card"><span>{initials(employee.name)}</span><div><strong>{employee.name}</strong><small>{employee.empNo} · {employee.department}</small><a href={`mailto:${employee.email}`}>{employee.email}</a></div></div> : <div className="empty-owner"><Package size={21} />Available in central stock</div>}</section><section className="detail-section qr-section"><div><h3>Live QR label</h3><p>Print and attach this code. Scanning always opens the latest asset record.</p><button className="button button-secondary" onClick={() => window.print()}><Printer size={16} />Print label</button></div>{qr && <img src={qr} alt={`QR code for ${asset.code}`} />}</section><section className="detail-section"><h3>History</h3><div className="mini-history">{movements.length ? movements.map((movement) => <div key={movement.id}><i /><div><strong>{movement.type}</strong><p>{employeeMap[movement.employeeId]?.name} · {movement.note}</p><small>{new Date(movement.date).toLocaleDateString("en-GB")}</small></div></div>) : <p className="muted">No previous movements.</p>}</div></section></div></aside></>;
 }
 
 function Modal({ title, children, onClose, wide = false }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   return <div className="modal-backdrop"><section className={wide ? "modal modal-wide" : "modal"}><div className="modal-head"><div><span>ASSETFLOW</span><h2>{title}</h2></div><button className="icon-button" onClick={onClose}><X size={20} /></button></div><div className="modal-body">{children}</div></section></div>;
 }
 
-function AssetForm({ onSave }: { onSave: (asset: Asset) => void }) {
-  const [form, setForm] = useState({ category: "IT Asset", type: "Laptop", name: "", brand: "", model: "", serial: "", condition: "Excellent", details: "" });
-  const [specs, setSpecs] = useState<Record<string, string>>({});
+function AssetForm({ onSave, initial }: { onSave: (asset: Asset) => void | Promise<void>; initial?: Asset }) {
+  const [form, setForm] = useState({ category: initial?.category ?? "IT Asset", type: initial?.type ?? "Laptop", name: initial?.name ?? "", brand: initial?.brand ?? "", model: initial?.model ?? "", serial: initial?.serial ?? "", condition: initial?.condition ?? "Excellent", details: initial?.details ?? "" });
+  const [specs, setSpecs] = useState<Record<string, string>>(initial?.specs ?? {});
+  const [saving, setSaving] = useState(false);
   const field = (key: keyof typeof form) => ({ value: form[key], onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm({ ...form, [key]: event.target.value }) });
   const category = form.category as keyof typeof ASSET_TYPES;
+  const typeOptions = useMemo(() => {
+    const options: string[] = [...ASSET_TYPES[category]];
+    if (initial?.category === category && !options.includes(initial.type)) options.push(initial.type);
+    return options;
+  }, [category, initial]);
   const dynamicFields = ASSET_SPEC_FIELDS[form.type] ?? [];
   const nonItModels = form.category === "Non-IT Asset" && form.type !== "Other"
     ? NON_IT_ITEM_MODELS[form.type as keyof typeof NON_IT_ITEM_MODELS]
     : null;
-  return <form className="form-grid" onSubmit={(event) => { event.preventDefault(); const prefix = form.category === "IT Asset" ? "IT" : "NIT"; onSave({ id: crypto.randomUUID(), code: `${prefix}-${form.type.slice(0, 3).toUpperCase()}-${String(Date.now()).slice(-4)}`, ...form, specs, category: form.category as Asset["category"], status: "Available", updatedAt: today() }); }}>
+  return <form className="form-grid" onSubmit={async (event) => { event.preventDefault(); if (saving) return; setSaving(true); const prefix = form.category === "IT Asset" ? "IT" : "NIT"; try { await onSave({ ...initial, id: initial?.id ?? crypto.randomUUID(), code: initial?.code ?? `${prefix}-${form.type.slice(0, 3).toUpperCase()}-${String(Date.now()).slice(-4)}`, ...form, specs, category: form.category as Asset["category"], status: initial?.status ?? "Available", updatedAt: today() }); } finally { setSaving(false); } }}>
     <label>Asset category<select value={form.category} onChange={(event) => { const nextCategory = event.target.value as keyof typeof ASSET_TYPES; setForm({ ...form, category: nextCategory, type: ASSET_TYPES[nextCategory][0], model: "" }); setSpecs({}); }}><option>IT Asset</option><option>Non-IT Asset</option></select></label>
-    <label>Item type<select value={form.type} onChange={(event) => { setForm({ ...form, type: event.target.value, model: "" }); setSpecs({}); }}>{ASSET_TYPES[category].map((type) => <option key={type}>{type}</option>)}</select></label>
+    <label>Item type<select value={form.type} onChange={(event) => { setForm({ ...form, type: event.target.value, model: "" }); setSpecs({}); }}>{typeOptions.map((type) => <option key={type}>{type}</option>)}</select></label>
     <label className="full">Display name<input required placeholder="e.g. Lenovo ThinkPad E14" {...field("name")} /></label>
     <label>Brand<input required placeholder="Lenovo" {...field("brand")} /></label>
     {form.category === "Non-IT Asset"
@@ -603,7 +611,7 @@ function AssetForm({ onSave }: { onSave: (asset: Asset) => void }) {
     {dynamicFields.map((spec) => <label key={spec.key}>{spec.label}{spec.options ? <select required value={specs[spec.key] ?? ""} onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })}><option value="">Select {spec.label.toLowerCase()}</option>{spec.options.map((option) => <option key={option}>{option}</option>)}</select> : <input required value={specs[spec.key] ?? ""} placeholder={spec.placeholder} onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })} />}</label>)}
     <label>Condition<select {...field("condition")}><option>Excellent</option><option>Good</option><option>Fair</option><option>Repair</option></select></label>
     <label className="full">Additional notes<textarea placeholder="Warranty, accessories or any other information…" {...field("details")} /></label>
-    <FormActions text="Add asset" />
+    <FormActions text={saving ? "Saving asset…" : initial ? "Update asset" : "Add asset"} disabled={saving} />
   </form>;
 }
 
@@ -748,5 +756,5 @@ function FormActions({ text, disabled = false }: { text: string; disabled?: bool
 }
 
 function modalTitle(modal: string) {
-  return { asset: "Add a new asset", employee: "Add employee", employeeEdit: "Edit employee details", departments: "Manage departments", assign: "Assign assets", return: "Return assets", repair: "Record asset repair", request: "Submit requirement", document: "Generate document", qrBatch: "Batch QR label printing", schedule: "Requirement form window" }[modal] || modal;
+  return { asset: "Add a new asset", assetEdit: "Edit asset details", employee: "Add employee", employeeEdit: "Edit employee details", departments: "Manage departments", assign: "Assign assets", return: "Return assets", repair: "Record asset repair", request: "Submit requirement", document: "Generate document", qrBatch: "Batch QR label printing", schedule: "Requirement form window" }[modal] || modal;
 }

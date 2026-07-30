@@ -98,3 +98,16 @@ test("keeps newly added departments usable when employees are added or updated",
     "department state must update only after Firestore confirms the save",
   );
 });
+
+test("supports editing assets without replacing their identity or assignment state", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /assetEdit: "Edit asset details"/);
+  assert.match(page, />Edit asset<\/button>/);
+  assert.match(page, /<AssetForm initial=\{editingAsset\}/);
+  assert.match(page, /id: initial\?\.id \?\? crypto\.randomUUID\(\)/);
+  assert.match(page, /code: initial\?\.code \?\?/);
+  assert.match(page, /status: initial\?\.status \?\? "Available"/);
+  assert.match(page, /setAssets\(\(rows\) => rows\.map\(\(row\) => row\.id === asset\.id \? asset : row\)\)/);
+  assert.match(page, /Asset details updated/);
+});
