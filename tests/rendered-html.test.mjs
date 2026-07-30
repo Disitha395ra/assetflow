@@ -82,3 +82,19 @@ test("uses constrained Chair, Table and Other inputs for Non-IT assets", async (
   assert.match(page, /Enter the other item type/);
   assert.match(page, /type: event\.target\.value, model: ""/);
 });
+
+test("keeps newly added departments usable when employees are added or updated", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /const departmentOptions = useMemo/);
+  assert.match(page, /const selectedDepartment = departmentOptions\.includes\(form\.department\)/);
+  assert.match(page, /departmentOptions\.map\(\(item\) => <option value=\{item\}/);
+  assert.match(page, /department: selectedDepartment\.trim\(\)/);
+  assert.equal(page.match(/setDepartment\(employee\.department\)/g)?.length, 2);
+
+  const departmentSave = page.match(/const nextWindow = \{ \.\.\.requirementWindow, departments: items \};(.+?)flash\("Department list updated"\)/s)?.[1] ?? "";
+  assert.ok(
+    departmentSave.indexOf("await saveRequirementWindow(nextWindow)") < departmentSave.indexOf("setDepartments(items)"),
+    "department state must update only after Firestore confirms the save",
+  );
+});
