@@ -112,17 +112,18 @@ test("supports editing assets without replacing their identity or assignment sta
   assert.match(page, /Asset details updated/);
 });
 
-test("deletes only unassigned assets and their lifecycle records atomically", async () => {
+test("deletes assigned or unassigned assets and their lifecycle records atomically", async () => {
   const [page, firebase] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /asset\.employeeId \|\| asset\.status === "Assigned"/);
+  assert.match(page, /const assignee = asset\.employeeId/);
+  assert.match(page, /deletion will remove that assignment without recording a return/);
   assert.match(page, /window\.confirm\(`Permanently delete \$\{asset\.code\}/);
   assert.match(page, /deleteAssetRecord\(asset\.id, movementIds\)/);
   assert.match(page, /Asset and lifecycle history deleted/);
-  assert.match(page, /disabled=\{deleting \|\| Boolean\(asset\.employeeId\)\}/);
+  assert.match(page, /disabled=\{deleting\}/);
   assert.match(firebase, /const batch = writeBatch\(db\)/);
   assert.match(firebase, /batch\.delete\(doc\(db, "assets", assetId\)\)/);
   assert.match(firebase, /batch\.delete\(doc\(db, "movements", movementId\)\)/);
