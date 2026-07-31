@@ -402,6 +402,8 @@ export default function Home() {
               setCategory={setCategory}
               onAdd={() => setModal("asset")}
               onAsset={setSelectedAsset}
+              onEdit={(asset) => { setEditingAsset(asset); setModal("assetEdit"); }}
+              onDelete={deleteAsset}
               onExport={exportWorkbook}
               onQrBatch={() => setModal("qrBatch")}
             />
@@ -510,7 +512,7 @@ function Dashboard({ assets, requests, movements, employeeMap, assetMap, onView,
   );
 }
 
-function AssetsView({ assets, allAssets, employeeMap, category, setCategory, onAdd, onAsset, onExport, onQrBatch }: { assets: Asset[]; allAssets: Asset[]; employeeMap: Record<string, Employee>; category: string; setCategory: (value: string) => void; onAdd: () => void; onAsset: (asset: Asset) => void; onExport: () => void; onQrBatch: () => void }) {
+function AssetsView({ assets, allAssets, employeeMap, category, setCategory, onAdd, onAsset, onEdit, onDelete, onExport, onQrBatch }: { assets: Asset[]; allAssets: Asset[]; employeeMap: Record<string, Employee>; category: string; setCategory: (value: string) => void; onAdd: () => void; onAsset: (asset: Asset) => void; onEdit: (asset: Asset) => void; onDelete: (asset: Asset) => void | Promise<void>; onExport: () => void; onQrBatch: () => void }) {
   const filters = [
     { value: "All", label: "All items", count: allAssets.length },
     { value: "Available", label: "Available items", count: allAssets.filter((asset) => asset.status === "Available").length },
@@ -529,7 +531,7 @@ function AssetsView({ assets, allAssets, employeeMap, category, setCategory, onA
       </div>
       <section className="panel table-panel">
         <div className="table-toolbar"><div><strong>Asset register</strong><small>{assets.length} matching records</small></div><div className="legend"><span><i className="dot green" />Available</span><span><i className="dot blue" />Assigned</span><span><i className="dot orange" />Repair</span></div></div>
-        <AssetTable assets={assets} employeeMap={employeeMap} onAsset={onAsset} />
+        <AssetTable assets={assets} employeeMap={employeeMap} onAsset={onAsset} onEdit={onEdit} onDelete={onDelete} />
       </section>
     </>
   );
@@ -604,8 +606,9 @@ function ReportsView({ assets, employees, requests, onExport, onDocument }: { as
   );
 }
 
-function AssetTable({ assets, employeeMap, onAsset, compact = false }: { assets: Asset[]; employeeMap: Record<string, Employee>; onAsset: (asset: Asset) => void; compact?: boolean }) {
-  return <div className="responsive-table"><table><thead><tr><th>Asset</th><th>Category</th>{!compact && <th>Serial / location</th>}<th>Assigned to</th><th>Status</th><th /></tr></thead><tbody>{assets.map((asset) => <tr key={asset.id} onClick={() => onAsset(asset)}><td><div className="asset-cell"><span>{asset.type === "Mobile Phone" ? <Smartphone size={18} /> : <Monitor size={18} />}</span><div><strong>{asset.name}</strong><small>{asset.code}</small></div></div></td><td><span className="category-label">{asset.category}</span></td>{!compact && <td><code>{asset.serial || asset.location || "—"}</code></td>}<td>{asset.employeeId ? <div className="mini-person"><span>{initials(employeeMap[asset.employeeId]?.name || "")}</span><div><strong>{employeeMap[asset.employeeId]?.name}</strong><small>{employeeMap[asset.employeeId]?.department}</small></div></div> : <span className="muted">{asset.category === "Non-IT Asset" ? asset.location || "—" : "—"}</span>}</td><td><span className={statusClass(asset.status)}>{asset.status}</span></td><td><button className="row-action" aria-label={`View ${asset.name}`}>→</button></td></tr>)}</tbody></table></div>;
+function AssetTable({ assets, employeeMap, onAsset, onEdit, onDelete, compact = false }: { assets: Asset[]; employeeMap: Record<string, Employee>; onAsset: (asset: Asset) => void; onEdit?: (asset: Asset) => void; onDelete?: (asset: Asset) => void | Promise<void>; compact?: boolean }) {
+  const showActions = Boolean(onEdit && onDelete);
+  return <div className="responsive-table"><table><thead><tr><th>Asset</th><th>Category</th>{!compact && <th>Serial / location</th>}<th>Assigned to</th><th>Status</th><th>{showActions ? "Actions" : ""}</th></tr></thead><tbody>{assets.map((asset) => <tr key={asset.id} onClick={() => onAsset(asset)}><td><div className="asset-cell"><span>{asset.type === "Mobile Phone" ? <Smartphone size={18} /> : <Monitor size={18} />}</span><div><strong>{asset.name}</strong><small>{asset.code}</small></div></div></td><td><span className="category-label">{asset.category}</span></td>{!compact && <td><code>{asset.serial || asset.location || "—"}</code></td>}<td>{asset.employeeId ? <div className="mini-person"><span>{initials(employeeMap[asset.employeeId]?.name || "")}</span><div><strong>{employeeMap[asset.employeeId]?.name}</strong><small>{employeeMap[asset.employeeId]?.department}</small></div></div> : <span className="muted">{asset.category === "Non-IT Asset" ? asset.location || "—" : "—"}</span>}</td><td><span className={statusClass(asset.status)}>{asset.status}</span></td><td>{showActions ? <div className="asset-row-actions"><button aria-label={`Edit ${asset.name}`} title="Edit asset" onClick={(event) => { event.stopPropagation(); onEdit?.(asset); }}><Pencil size={15} />Edit</button><button className="delete" aria-label={`Delete ${asset.name}`} title={asset.employeeId ? "Delete assigned asset" : "Delete asset"} onClick={(event) => { event.stopPropagation(); void onDelete?.(asset); }}><Trash2 size={15} />Delete</button></div> : <button className="row-action" aria-label={`View ${asset.name}`}>→</button>}</td></tr>)}</tbody></table></div>;
 }
 
 function AssetDrawer({ asset, employee, movements, employeeMap, onEdit, onDelete, onClose }: { asset: Asset; employee?: Employee; movements: Movement[]; employeeMap: Record<string, Employee>; onEdit: () => void; onDelete: () => void | Promise<void>; onClose: () => void }) {

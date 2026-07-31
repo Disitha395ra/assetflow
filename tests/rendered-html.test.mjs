@@ -85,6 +85,12 @@ test("supports editing and deleting assigned or unassigned assets safely", async
   assert.match(page, /status: initial\?\.status \?\? "Available"/);
   assert.match(page, /deletion will remove that assignment without recording a return/);
   assert.match(page, /deleteAssetRecord\(asset\.id, movementIds\)/);
+  assert.match(page, /onEdit=\{\(asset\) => \{ setEditingAsset\(asset\); setModal\("assetEdit"\); \}\}/);
+  assert.match(page, /<AssetTable assets=\{assets\} employeeMap=\{employeeMap\} onAsset=\{onAsset\} onEdit=\{onEdit\} onDelete=\{onDelete\}/);
+  assert.match(page, /aria-label=\{`Edit \$\{asset\.name\}`\}/);
+  assert.match(page, /aria-label=\{`Delete \$\{asset\.name\}`\}/);
+  assert.match(page, /event\.stopPropagation\(\); onEdit\?\.\(asset\)/);
+  assert.match(page, /event\.stopPropagation\(\); void onDelete\?\.\(asset\)/);
   assert.match(firebase, /const withoutUndefined/);
   assert.match(firebase, /batch\.delete\(doc\(db, "assets", assetId, "history", movementId\)\)/);
   assert.match(firebase, /await batch\.commit\(\)/);
