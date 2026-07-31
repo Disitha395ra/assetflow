@@ -52,3 +52,57 @@ test("supports custom departments, employee editing and type-specific asset fiel
   assert.match(requirementPage, /config\.departments/);
   assert.match(rules, /match \/settings\/departments/);
 });
+
+test("keeps department choices synchronized across every department workflow", async () => {
+  const [page, requirementPage, firebase] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/requirements/[slug]/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /watchRequirementWindow\(\(config\) =>/);
+  assert.match(page, /const departmentOptions = useMemo/);
+  assert.match(page, /\.\.\.employees\.map\(\(employee\) => employee\.department\)/);
+  assert.match(page, /\.\.\.assets\.map\(\(asset\) => asset\.location \?\? ""\)/);
+  assert.match(page, /\.\.\.requests\.map\(\(request\) => request\.department\)/);
+  assert.ok((page.match(/departments=\{departmentOptions\}/g) ?? []).length >= 6);
+  assert.match(page, /employee\.department\.trim\(\)\.toLowerCase\(\) === department\.toLowerCase\(\)/);
+  assert.match(requirementPage, /watchRequirementWindow\(applyConfig\)/);
+  assert.match(firebase, /export function watchRequirementWindow/);
+});
+
+test("supports editing and deleting assigned or unassigned assets safely", async () => {
+  const [page, firebase] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /assetEdit: "Edit asset details"/);
+  assert.match(page, />Edit asset<\/button>/);
+  assert.match(page, /<AssetForm departments=\{departmentOptions\} initial=\{editingAsset\}/);
+  assert.match(page, /id: initial\?\.id \?\? crypto\.randomUUID\(\)/);
+  assert.match(page, /code: initial\?\.code \?\?/);
+  assert.match(page, /status: initial\?\.status \?\? "Available"/);
+  assert.match(page, /deletion will remove that assignment without recording a return/);
+  assert.match(page, /deleteAssetRecord\(asset\.id, movementIds\)/);
+  assert.match(firebase, /const withoutUndefined/);
+  assert.match(firebase, /batch\.delete\(doc\(db, "assets", assetId, "history", movementId\)\)/);
+  assert.match(firebase, /await batch\.commit\(\)/);
+});
+
+test("retains Non-IT model choices and accurate asset filters after workflow merge", async () => {
+  const [page, catalog] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/catalog.ts", import.meta.url), "utf8"),
+  ]);
+
+  for (const option of ["Alpha (60*120)", "KWT022 (75*152)", "OCM-043", "Task Chair OCP-001"]) {
+    assert.ok(catalog.includes(`"${option}"`), `missing Non-IT option: ${option}`);
+  }
+  assert.match(page, /NON_IT_ITEM_MODELS/);
+  assert.match(page, /Enter the other item type/);
+  assert.match(page, /\{ value: "Available", label: "Available items"/);
+  assert.match(page, /\{ value: "IT Asset", label: "IT items"/);
+  assert.match(page, /\{ value: "Non-IT Asset", label: "Non-IT items"/);
+  assert.match(page, /allAssets=\{assets\}/);
+});

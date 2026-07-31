@@ -75,7 +75,18 @@ export async function saveRecord<T extends { id: string }>(
   value: T,
 ) {
   if (!db) return;
-  await setDoc(doc(db, name, value.id), value);
+  const withoutUndefined = (item: unknown): unknown => {
+    if (Array.isArray(item)) return item.map(withoutUndefined);
+    if (item && typeof item === "object") {
+      return Object.fromEntries(
+        Object.entries(item)
+          .filter(([, entry]) => entry !== undefined)
+          .map(([key, entry]) => [key, withoutUndefined(entry)]),
+      );
+    }
+    return item;
+  };
+  await setDoc(doc(db, name, value.id), withoutUndefined(value));
 }
 
 export async function removeRecord(name: string, id: string) {
@@ -85,12 +96,15 @@ export async function removeRecord(name: string, id: string) {
 
 export async function deleteAssetRecord(assetId: string, movementIds: string[]) {
   if (!db) return;
-  if (movementIds.length > 498) {
+  if (movementIds.length > 249) {
     throw new Error("This asset has too many lifecycle records to delete in one operation.");
   }
   const batch = writeBatch(db);
   batch.delete(doc(db, "assets", assetId));
-  movementIds.forEach((movementId) => batch.delete(doc(db, "movements", movementId)));
+  movementIds.forEach((movementId) => {
+    batch.delete(doc(db, "movements", movementId));
+    batch.delete(doc(db, "assets", assetId, "history", movementId));
+  });
   await batch.commit();
 }
 

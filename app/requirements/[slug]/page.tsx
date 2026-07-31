@@ -15,6 +15,7 @@ import {
   firebaseReady,
   getRequirementWindow,
   saveRecord,
+  watchRequirementWindow,
   type RequirementWindowRecord,
 } from "@/lib/firebase";
 import { DEFAULT_DEPARTMENTS } from "@/lib/catalog";
@@ -33,14 +34,20 @@ export default function PublicRequirementForm() {
   });
 
   useEffect(() => {
-    getRequirementWindow().then((config) => {
+    const applyConfig = (config: RequirementWindowRecord) => {
       setWindowConfig(config);
-      if (config?.departments?.length) {
+      if (config.departments?.length) {
         setDepartments(config.departments);
-        setForm((current) => ({ ...current, department: config.departments![0] }));
+        setForm((current) => config.departments!.includes(current.department)
+          ? current
+          : { ...current, department: config.departments![0] });
       }
       setLoading(false);
+    };
+    getRequirementWindow().then((config) => {
+      applyConfig(config);
     });
+    return watchRequirementWindow(applyConfig);
   }, []);
 
   const isAvailable = useMemo(() => {
