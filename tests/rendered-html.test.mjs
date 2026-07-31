@@ -112,3 +112,14 @@ test("retains Non-IT model choices and accurate asset filters after workflow mer
   assert.match(page, /\{ value: "Non-IT Asset", label: "Non-IT items"/);
   assert.match(page, /allAssets=\{assets\}/);
 });
+
+test("prevents realtime and double-submit duplicate assets in assignment", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /setAssets\(\(rows\) => \[asset, \.\.\.rows\.filter\(\(row\) => row\.id !== asset\.id\)\]\)/);
+  assert.match(page, /const assetId = useRef\(initial\?\.id \?\? crypto\.randomUUID\(\)\)/);
+  assert.match(page, /const submitting = useRef\(false\)/);
+  assert.match(page, /if \(submitting\.current\) return; submitting\.current = true/);
+  assert.match(page, /id: assetId\.current/);
+  assert.match(page, /new Map\(assets\.filter\(\(asset\) => asset\.status === "Available"\)\.map\(\(asset\) => \[asset\.id, asset\]\)\)/);
+});

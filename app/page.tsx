@@ -39,7 +39,7 @@ import {
   X,
 } from "lucide-react";
 import QRCode from "qrcode";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ADMIN_EMAIL,
   DEFAULT_REQUIREMENT_WINDOW,
@@ -435,7 +435,7 @@ export default function Home() {
       {selectedAsset && <AssetDrawer asset={selectedAsset} employee={selectedAsset.employeeId ? employeeMap[selectedAsset.employeeId] : undefined} movements={movements.filter((row) => row.assetId === selectedAsset.id)} employeeMap={employeeMap} onEdit={() => { setEditingAsset(selectedAsset); setSelectedAsset(null); setModal("assetEdit"); }} onDelete={() => deleteAsset(selectedAsset)} onClose={() => setSelectedAsset(null)} />}
       {modal && (
         <Modal title={modalTitle(modal)} wide={modal === "document"} onClose={() => setModal(null)}>
-          {modal === "asset" && <AssetForm departments={departmentOptions} onSave={async (asset) => { await saveRecord("assets", asset); setAssets((rows) => [asset, ...rows]); setModal(null); flash("Asset added to inventory"); }} />}
+          {modal === "asset" && <AssetForm departments={departmentOptions} onSave={async (asset) => { await saveRecord("assets", asset); setAssets((rows) => [asset, ...rows.filter((row) => row.id !== asset.id)]); setModal(null); flash("Asset added to inventory"); }} />}
           {modal === "assetEdit" && editingAsset && <AssetForm departments={departmentOptions} initial={editingAsset} onSave={async (asset) => { await saveRecord("assets", asset); setAssets((rows) => rows.map((row) => row.id === asset.id ? asset : row)); setEditingAsset(null); setModal(null); setSelectedAsset(asset); flash("Asset details updated"); }} />}
           {modal === "employee" && <EmployeeForm departments={departmentOptions} onSave={async (employee) => { await saveRecord("employees", employee); setEmployees((rows) => [employee, ...rows]); setDepartment(employee.department); setModal(null); flash("Employee added"); }} />}
           {modal === "employeeEdit" && editingEmployee && <EmployeeForm departments={departmentOptions} initial={editingEmployee} onSave={async (employee) => { await saveRecord("employees", employee); setEmployees((rows) => rows.map((row) => row.id === employee.id ? employee : row)); setDepartment(employee.department); setEditingEmployee(null); setModal(null); flash("Employee details updated"); }} />}
@@ -626,6 +626,8 @@ function AssetForm({ departments, onSave, initial }: { departments: string[]; on
   const [form, setForm] = useState({ category: initial?.category ?? "IT Asset", type: initial?.type ?? "Laptop", name: initial?.name ?? "", brand: initial?.brand ?? "", model: initial?.model ?? "", serial: initial?.serial ?? "", location: initial?.location ?? initial?.custodianDepartment ?? departments[0] ?? "", condition: initial?.condition ?? "Excellent", details: initial?.details ?? "" });
   const [specs, setSpecs] = useState<Record<string, string>>(initial?.specs ?? {});
   const [saving, setSaving] = useState(false);
+  const assetId = useRef(initial?.id ?? crypto.randomUUID());
+  const submitting = useRef(false);
   const field = (key: keyof typeof form) => ({ value: form[key], onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm({ ...form, [key]: event.target.value }) });
   const category = form.category as keyof typeof ASSET_TYPES;
   const typeOptions = useMemo(() => {
@@ -638,7 +640,7 @@ function AssetForm({ departments, onSave, initial }: { departments: string[]; on
   const nonItModels = isNonIt && form.type !== "Other"
     ? NON_IT_ITEM_MODELS[form.type as keyof typeof NON_IT_ITEM_MODELS]
     : null;
-  return <form className="form-grid" onSubmit={async (event) => { event.preventDefault(); if (saving) return; setSaving(true); const prefix = form.category === "IT Asset" ? "IT" : "NIT"; try { await onSave({ ...initial, id: initial?.id ?? crypto.randomUUID(), code: initial?.code ?? `${prefix}-${form.type.slice(0, 3).toUpperCase()}-${String(Date.now()).slice(-4)}`, ...form, serial: isNonIt ? "" : form.serial, location: isNonIt ? form.location : undefined, specs, category: form.category as Asset["category"], status: initial?.status ?? "Available", updatedAt: today() }); } finally { setSaving(false); } }}>
+  return <form className="form-grid" onSubmit={async (event) => { event.preventDefault(); if (submitting.current) return; submitting.current = true; setSaving(true); const prefix = form.category === "IT Asset" ? "IT" : "NIT"; try { await onSave({ ...initial, id: assetId.current, code: initial?.code ?? `${prefix}-${form.type.slice(0, 3).toUpperCase()}-${String(Date.now()).slice(-4)}`, ...form, serial: isNonIt ? "" : form.serial, location: isNonIt ? form.location : undefined, specs, category: form.category as Asset["category"], status: initial?.status ?? "Available", updatedAt: today() }); } finally { submitting.current = false; setSaving(false); } }}>
     <label>Asset category<select value={form.category} onChange={(event) => { const nextCategory = event.target.value as keyof typeof ASSET_TYPES; setForm({ ...form, category: nextCategory, type: ASSET_TYPES[nextCategory][0], model: "", serial: nextCategory === "Non-IT Asset" ? "" : form.serial }); setSpecs({}); }}><option>IT Asset</option><option>Non-IT Asset</option></select></label>
     <label>Item type<select value={form.type} onChange={(event) => { setForm({ ...form, type: event.target.value, model: "" }); setSpecs({}); }}>{typeOptions.map((type) => <option key={type}>{type}</option>)}</select></label>
     <label className="full">Display name<input required placeholder="e.g. Lenovo ThinkPad E14" {...field("name")} /></label>
@@ -676,7 +678,9 @@ function EmployeeForm({ departments, onSave, initial }: { departments: string[];
 function AssignForm({ assets, employees, onSave }: { assets: Asset[]; employees: Employee[]; onSave: (assetIds: string[], employeeId: string) => void }) {
   const [employeeId, setEmployeeId] = useState(employees[0]?.id || "");
   const [selected, setSelected] = useState<string[]>([]);
-  const available = assets.filter((asset) => asset.status === "Available");
+  const available = Array.from(
+    new Map(assets.filter((asset) => asset.status === "Available").map((asset) => [asset.id, asset])).values(),
+  );
   return <form onSubmit={(event) => { event.preventDefault(); if (selected.length) onSave(selected, employeeId); }}><label className="stacked-label">Assign to<select value={employeeId} onChange={(event) => setEmployeeId(event.target.value)}>{employees.filter((employee) => employee.status === "Active").map((employee) => <option value={employee.id} key={employee.id}>{employee.name} · {employee.department}</option>)}</select></label><p className="field-heading">Select one or more available items</p><div className="check-list">{available.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial || asset.location || "No serial"}</small></span><em>{asset.type}</em></label>)}</div><FormActions text={`Assign ${selected.length || ""} item${selected.length === 1 ? "" : "s"}`} disabled={!selected.length} /></form>;
 }
 
