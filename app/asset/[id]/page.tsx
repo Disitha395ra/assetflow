@@ -25,6 +25,7 @@ type PublicAsset = {
   brand: string;
   model: string;
   serial: string;
+  location?: string;
   status: string;
   condition: string;
   details: string;
@@ -83,7 +84,7 @@ export default function PublicAssetPage() {
           <article className="public-card">
             <div className="public-card-title"><PackageCheck size={18} /><div><h2>Asset description</h2><p>Identity and technical information</p></div></div>
             <div className="public-detail-grid">
-              <label>Serial number<strong>{asset.serial}</strong></label>
+              {asset.category === "Non-IT Asset" ? <label>Current location<strong>{asset.location || asset.custodianDepartment || "Not recorded"}</strong></label> : <label>Serial number<strong>{asset.serial || "Not recorded"}</strong></label>}
               <label>Category<strong>{asset.category}</strong></label>
               <label>Asset type<strong>{asset.type}</strong></label>
               <label>Condition<strong>{asset.condition}</strong></label>
@@ -109,7 +110,7 @@ export default function PublicAssetPage() {
         <aside>
           <article className="public-card public-custodian">
             <div className="public-card-title"><UserRound size={18} /><div><h2>Current custodian</h2><p>Live assignment status</p></div></div>
-            {asset.custodianName ? <><span className="public-avatar">{asset.custodianName.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><h3>{asset.custodianName}</h3><p><Building2 size={14} />{asset.custodianDepartment}</p></> : <div className="public-stock"><PackageCheck size={22} /><strong>Available in stock</strong><span>This item is currently under IT custody.</span></div>}
+            {asset.custodianName ? <><span className="public-avatar">{asset.custodianName.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><h3>{asset.custodianName}</h3><p><Building2 size={14} />{asset.custodianDepartment}</p></> : <div className="public-stock"><PackageCheck size={22} /><strong>Available in stock</strong><span>{asset.location ? `Current location: ${asset.location}` : "This item is currently under IT custody."}</span></div>}
           </article>
           <article className="public-verification">
             <ShieldCheck size={22} />
