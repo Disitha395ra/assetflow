@@ -33,7 +33,6 @@ import {
   Settings,
   ShieldCheck,
   Smartphone,
-  Trash2,
   Users,
   Wrench,
   X,
@@ -43,7 +42,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ADMIN_EMAIL,
   DEFAULT_REQUIREMENT_WINDOW,
-  deleteAssetRecord,
   firebaseReady,
   getRequirementWindow,
   saveRecord,
@@ -52,10 +50,9 @@ import {
   signOutAdmin,
   watchAuth,
   watchCollection,
-  watchRequirementWindow,
   type RequirementWindowRecord,
 } from "@/lib/firebase";
-import { ASSET_SPEC_FIELDS, ASSET_TYPES, DEFAULT_DEPARTMENTS, NON_IT_ITEM_MODELS } from "@/lib/catalog";
+import { ASSET_SPEC_FIELDS, ASSET_TYPES, DEFAULT_DEPARTMENTS } from "@/lib/catalog";
 
 type AssetStatus = "Available" | "Assigned" | "In repair" | "Retired";
 type Asset = {
@@ -67,6 +64,7 @@ type Asset = {
   brand: string;
   model: string;
   serial: string;
+  location?: string;
   status: AssetStatus;
   employeeId?: string;
   condition: string;
@@ -156,9 +154,8 @@ export default function Home() {
   const [category, setCategory] = useState("All");
   const [department, setDepartment] = useState("All");
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
-  const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
-  const [modal, setModal] = useState<"asset" | "assetEdit" | "employee" | "employeeEdit" | "departments" | "assign" | "return" | "repair" | "request" | "document" | "qrBatch" | "schedule" | null>(null);
+  const [modal, setModal] = useState<"asset" | "employee" | "employeeEdit" | "departments" | "assign" | "return" | "repair" | "request" | "document" | "qrBatch" | "schedule" | null>(null);
   const [documentType, setDocumentType] = useState("Asset Handover");
   const [documentEmployeeId, setDocumentEmployeeId] = useState("");
   const [documentAssetIds, setDocumentAssetIds] = useState<string[]>([]);
@@ -182,12 +179,10 @@ export default function Home() {
       watchCollection<Employee>("employees", setEmployees),
       watchCollection<Movement>("movements", setMovements),
       watchCollection<RequestRow>("requirements", setRequests),
-      watchRequirementWindow((config) => {
-        setRequirementWindow(config);
-        if (config.departments?.length) setDepartments(config.departments);
-      }),
     ];
     getRequirementWindow().then((config) => {
+      if (!config) return;
+      setRequirementWindow(config);
       if (config.departments?.length) setDepartments(config.departments);
     });
     return () => cleanups.forEach((cleanup) => cleanup());
@@ -201,19 +196,11 @@ export default function Home() {
     () => Object.fromEntries(assets.map((item) => [item.id, item])),
     [assets],
   );
-  const employeeDepartments = useMemo(() => {
-    const options: string[] = [];
-    [...departments, ...employees.map((employee) => employee.department)].forEach((value) => {
-      const item = value.trim();
-      if (item && !options.some((option) => option.toLowerCase() === item.toLowerCase())) options.push(item);
-    });
-    return options;
-  }, [departments, employees]);
 
   const filteredAssets = assets.filter((asset) => {
     const needle = search.toLowerCase();
     return (
-      (category === "All" || (category === "Available" ? asset.status === "Available" : asset.category === category)) &&
+      (category === "All" || asset.category === category) &&
       [asset.code, asset.name, asset.serial, asset.brand, asset.type]
         .join(" ")
         .toLowerCase()
@@ -224,7 +211,7 @@ export default function Home() {
   const filteredEmployees = employees.filter((employee) => {
     const needle = search.toLowerCase();
     return (
-      (department === "All" || employee.department.trim().toLowerCase() === department.toLowerCase()) &&
+      (department === "All" || employee.department === department) &&
       [employee.name, employee.empNo, employee.department, employee.designation]
         .join(" ")
         .toLowerCase()
@@ -240,18 +227,6 @@ export default function Home() {
   async function updateAsset(asset: Asset) {
     setAssets((rows) => rows.map((row) => (row.id === asset.id ? asset : row)));
     await saveRecord("assets", asset);
-  }
-
-  async function deleteAsset(asset: Asset) {
-    const assignee = asset.employeeId ? asset.custodianName || employeeMap[asset.employeeId]?.name || "an employee" : "";
-    const assignmentWarning = assignee ? ` It is currently assigned to ${assignee}; deletion will remove that assignment without recording a return.` : "";
-    if (!window.confirm(`Permanently delete ${asset.code} — ${asset.name}?${assignmentWarning} Its QR record and lifecycle history will also be deleted. This cannot be undone.`)) return;
-    const movementIds = movements.filter((movement) => movement.assetId === asset.id).map((movement) => movement.id);
-    await deleteAssetRecord(asset.id, movementIds);
-    setAssets((rows) => rows.filter((row) => row.id !== asset.id));
-    setMovements((rows) => rows.filter((movement) => movement.assetId !== asset.id));
-    setSelectedAsset(null);
-    flash("Asset and lifecycle history deleted");
   }
 
   async function addMovement(movement: Movement) {
@@ -284,6 +259,7 @@ export default function Home() {
       Brand: asset.brand,
       Model: asset.model,
       "Serial Number": asset.serial,
+      "Current Location": asset.location || asset.custodianDepartment || "",
       Status: asset.status,
       "Assigned Employee": asset.employeeId ? employeeMap[asset.employeeId]?.name : "",
       Department: asset.employeeId ? employeeMap[asset.employeeId]?.department : "",
@@ -389,7 +365,6 @@ export default function Home() {
           {view === "Assets" && (
             <AssetsView
               assets={filteredAssets}
-              allAssets={assets}
               employeeMap={employeeMap}
               category={category}
               setCategory={setCategory}
@@ -405,7 +380,7 @@ export default function Home() {
               assets={assets}
               department={department}
               setDepartment={setDepartment}
-              departments={employeeDepartments}
+              departments={departments}
               onAdd={() => setModal("employee")}
               onEdit={(employee) => { setEditingEmployee(employee); setModal("employeeEdit"); }}
               onDocument={openDocument}
@@ -423,16 +398,15 @@ export default function Home() {
         </div>
       </section>
 
-      {selectedAsset && <AssetDrawer asset={selectedAsset} employee={selectedAsset.employeeId ? employeeMap[selectedAsset.employeeId] : undefined} movements={movements.filter((row) => row.assetId === selectedAsset.id)} employeeMap={employeeMap} onEdit={() => { setEditingAsset(selectedAsset); setSelectedAsset(null); setModal("assetEdit"); }} onDelete={() => deleteAsset(selectedAsset)} onClose={() => setSelectedAsset(null)} />}
+      {selectedAsset && <AssetDrawer asset={selectedAsset} employee={selectedAsset.employeeId ? employeeMap[selectedAsset.employeeId] : undefined} movements={movements.filter((row) => row.assetId === selectedAsset.id)} employeeMap={employeeMap} onClose={() => setSelectedAsset(null)} />}
       {modal && (
         <Modal title={modalTitle(modal)} wide={modal === "document"} onClose={() => setModal(null)}>
-          {modal === "asset" && <AssetForm onSave={async (asset) => { setAssets((rows) => [asset, ...rows]); await saveRecord("assets", asset); setModal(null); flash("Asset added to inventory"); }} />}
-          {modal === "assetEdit" && editingAsset && <AssetForm initial={editingAsset} onSave={async (asset) => { await saveRecord("assets", asset); setAssets((rows) => rows.map((row) => row.id === asset.id ? asset : row)); setEditingAsset(null); setModal(null); setSelectedAsset(asset); flash("Asset details updated"); }} />}
-          {modal === "employee" && <EmployeeForm departments={employeeDepartments} onSave={async (employee) => { await saveRecord("employees", employee); setEmployees((rows) => [employee, ...rows]); setDepartment(employee.department); setModal(null); flash("Employee added"); }} />}
-          {modal === "employeeEdit" && editingEmployee && <EmployeeForm departments={employeeDepartments} initial={editingEmployee} onSave={async (employee) => { await saveRecord("employees", employee); setEmployees((rows) => rows.map((row) => row.id === employee.id ? employee : row)); setDepartment(employee.department); setEditingEmployee(null); setModal(null); flash("Employee details updated"); }} />}
-          {modal === "departments" && <DepartmentManager departments={departments} employees={employees} onSave={async (items) => { const nextWindow = { ...requirementWindow, departments: items }; await saveRequirementWindow(nextWindow); setDepartments(items); setRequirementWindow(nextWindow); setModal(null); flash("Department list updated"); }} />}
-          {modal === "assign" && <AssignForm assets={assets} employees={employees} onSave={async (assetIds, employeeId) => { const employee = employeeMap[employeeId]; for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Assigned", employeeId, custodianName: employee?.name, custodianDepartment: employee?.department, updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: "Assigned", date: today(), note: "Asset issued through AssetFlow" }); } openDocument("Asset Handover", employeeId, assetIds); flash(`${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned — handover document ready`); }} />}
-          {modal === "return" && <ReturnForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, clearance) => { for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Available", employeeId: undefined, custodianName: undefined, custodianDepartment: undefined, condition: "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: clearance ? "Cleared" : "Returned", date: today(), note: clearance ? "Returned during employee clearance" : "Returned to IT stock" }); } openDocument(clearance ? "Employee Clearance" : "Asset Return", employeeId, assetIds); flash(clearance ? "Clearance report ready" : "Return document ready"); }} />}
+          {modal === "asset" && <AssetForm departments={departments} onSave={async (asset) => { setAssets((rows) => [asset, ...rows]); await saveRecord("assets", asset); setModal(null); flash("Asset added to inventory"); }} />}
+          {modal === "employee" && <EmployeeForm departments={departments} onSave={async (employee) => { setEmployees((rows) => [employee, ...rows]); await saveRecord("employees", employee); setModal(null); flash("Employee added"); }} />}
+          {modal === "employeeEdit" && editingEmployee && <EmployeeForm departments={departments} initial={editingEmployee} onSave={async (employee) => { setEmployees((rows) => rows.map((row) => row.id === employee.id ? employee : row)); await saveRecord("employees", employee); setEditingEmployee(null); setModal(null); flash("Employee details updated"); }} />}
+          {modal === "departments" && <DepartmentManager departments={departments} employees={employees} onSave={async (items) => { const nextWindow = { ...requirementWindow, departments: items }; setDepartments(items); setRequirementWindow(nextWindow); await saveRequirementWindow(nextWindow); setModal(null); flash("Department list updated"); }} />}
+          {modal === "assign" && <AssignForm assets={assets} employees={employees} onSave={async (assetIds, employeeId) => { const employee = employeeMap[employeeId]; for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Assigned", employeeId, location: asset.category === "Non-IT Asset" ? employee?.department : asset.location, custodianName: employee?.name, custodianDepartment: employee?.department, updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: "Assigned", date: today(), note: "Asset issued through AssetFlow" }); } openDocument("Asset Handover", employeeId, assetIds); flash(`${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned — handover document ready`); }} />}
+          {modal === "return" && <ReturnForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, clearance) => { for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Available", employeeId: undefined, location: asset.category === "Non-IT Asset" ? "IT Dept" : asset.location, custodianName: undefined, custodianDepartment: undefined, condition: "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: clearance ? "Cleared" : "Returned", date: today(), note: clearance ? "Returned during employee clearance" : "Returned to IT stock" }); } openDocument(clearance ? "Employee Clearance" : "Asset Return", employeeId, assetIds); flash(clearance ? "Clearance report ready" : "Return document ready"); }} />}
           {modal === "repair" && <RepairForm assets={assets} onSave={async (assetId, action, note) => { const asset = assets.find((row) => row.id === assetId); if (!asset) return; const nextStatus: AssetStatus = action === "start" ? "In repair" : asset.employeeId ? "Assigned" : "Available"; await updateAsset({ ...asset, status: nextStatus, condition: action === "start" ? "Repair" : "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId: asset.employeeId || "", type: "Repair", date: today(), note: `${action === "start" ? "Sent for repair" : "Repair completed"}: ${note}` }); setModal(null); flash(action === "start" ? "Repair record started" : "Repair completion recorded"); }} />}
           {modal === "request" && <RequestForm departments={departments} onSave={async (request) => { setRequests((rows) => [request, ...rows]); await saveRecord("requirements", request); setModal(null); flash("Requirement submitted"); }} />}
           {modal === "document" && <PrintableDocument type={documentType} employees={employees} assets={assets} initialEmployeeId={documentEmployeeId} initialAssetIds={documentAssetIds} />}
@@ -503,13 +477,7 @@ function Dashboard({ assets, requests, movements, employeeMap, assetMap, onView,
   );
 }
 
-function AssetsView({ assets, allAssets, employeeMap, category, setCategory, onAdd, onAsset, onExport, onQrBatch }: { assets: Asset[]; allAssets: Asset[]; employeeMap: Record<string, Employee>; category: string; setCategory: (value: string) => void; onAdd: () => void; onAsset: (asset: Asset) => void; onExport: () => void; onQrBatch: () => void }) {
-  const filters = [
-    { value: "All", label: "All items", count: allAssets.length },
-    { value: "Available", label: "Available items", count: allAssets.filter((asset) => asset.status === "Available").length },
-    { value: "IT Asset", label: "IT items", count: allAssets.filter((asset) => asset.category === "IT Asset").length },
-    { value: "Non-IT Asset", label: "Non-IT items", count: allAssets.filter((asset) => asset.category === "Non-IT Asset").length },
-  ];
+function AssetsView({ assets, employeeMap, category, setCategory, onAdd, onAsset, onExport, onQrBatch }: { assets: Asset[]; employeeMap: Record<string, Employee>; category: string; setCategory: (value: string) => void; onAdd: () => void; onAsset: (asset: Asset) => void; onExport: () => void; onQrBatch: () => void }) {
   return (
     <>
       <PageHead eyebrow="INVENTORY" title="Assets" description="Track every IT and non-IT item, its condition, owner and complete history.">
@@ -518,7 +486,7 @@ function AssetsView({ assets, allAssets, employeeMap, category, setCategory, onA
         <button className="button button-primary" onClick={onAdd}><Plus size={17} />Add asset</button>
       </PageHead>
       <div className="filter-tabs">
-        {filters.map((filter) => <button className={category === filter.value ? "active" : ""} key={filter.value} onClick={() => setCategory(filter.value)}>{filter.label}<span>{filter.count}</span></button>)}
+        {["All", "IT Asset", "Non-IT Asset"].map((item) => <button className={category === item ? "active" : ""} key={item} onClick={() => setCategory(item)}>{item}<span>{item === "All" ? assets.length : assets.filter((asset) => asset.category === item).length}</span></button>)}
       </div>
       <section className="panel table-panel">
         <div className="table-toolbar"><div><strong>Asset register</strong><small>{assets.length} matching records</small></div><div className="legend"><span><i className="dot green" />Available</span><span><i className="dot blue" />Assigned</span><span><i className="dot orange" />Repair</span></div></div>
@@ -598,68 +566,45 @@ function ReportsView({ assets, employees, requests, onExport, onDocument }: { as
 }
 
 function AssetTable({ assets, employeeMap, onAsset, compact = false }: { assets: Asset[]; employeeMap: Record<string, Employee>; onAsset: (asset: Asset) => void; compact?: boolean }) {
-  return <div className="responsive-table"><table><thead><tr><th>Asset</th><th>Category</th>{!compact && <th>Serial number</th>}<th>Assigned to</th><th>Status</th><th /></tr></thead><tbody>{assets.map((asset) => <tr key={asset.id} onClick={() => onAsset(asset)}><td><div className="asset-cell"><span>{asset.type === "Mobile Phone" ? <Smartphone size={18} /> : <Monitor size={18} />}</span><div><strong>{asset.name}</strong><small>{asset.code}</small></div></div></td><td><span className="category-label">{asset.category}</span></td>{!compact && <td><code>{asset.serial}</code></td>}<td>{asset.employeeId ? <div className="mini-person"><span>{initials(employeeMap[asset.employeeId]?.name || "")}</span><div><strong>{employeeMap[asset.employeeId]?.name}</strong><small>{employeeMap[asset.employeeId]?.department}</small></div></div> : <span className="muted">—</span>}</td><td><span className={statusClass(asset.status)}>{asset.status}</span></td><td><button className="row-action" aria-label={`View ${asset.name}`}>→</button></td></tr>)}</tbody></table></div>;
+  return <div className="responsive-table"><table><thead><tr><th>Asset</th><th>Category</th>{!compact && <th>Serial / location</th>}<th>Assigned to</th><th>Status</th><th /></tr></thead><tbody>{assets.map((asset) => <tr key={asset.id} onClick={() => onAsset(asset)}><td><div className="asset-cell"><span>{asset.type === "Mobile Phone" ? <Smartphone size={18} /> : <Monitor size={18} />}</span><div><strong>{asset.name}</strong><small>{asset.code}</small></div></div></td><td><span className="category-label">{asset.category}</span></td>{!compact && <td><code>{asset.serial || asset.location || "—"}</code></td>}<td>{asset.employeeId ? <div className="mini-person"><span>{initials(employeeMap[asset.employeeId]?.name || "")}</span><div><strong>{employeeMap[asset.employeeId]?.name}</strong><small>{employeeMap[asset.employeeId]?.department}</small></div></div> : <span className="muted">{asset.category === "Non-IT Asset" ? asset.location || "—" : "—"}</span>}</td><td><span className={statusClass(asset.status)}>{asset.status}</span></td><td><button className="row-action" aria-label={`View ${asset.name}`}>→</button></td></tr>)}</tbody></table></div>;
 }
 
-function AssetDrawer({ asset, employee, movements, employeeMap, onEdit, onDelete, onClose }: { asset: Asset; employee?: Employee; movements: Movement[]; employeeMap: Record<string, Employee>; onEdit: () => void; onDelete: () => void | Promise<void>; onClose: () => void }) {
+function AssetDrawer({ asset, employee, movements, employeeMap, onClose }: { asset: Asset; employee?: Employee; movements: Movement[]; employeeMap: Record<string, Employee>; onClose: () => void }) {
   const [qr, setQr] = useState("");
-  const [deleting, setDeleting] = useState(false);
   useEffect(() => { QRCode.toDataURL(`${window.location.origin}/asset/${asset.id}`, { width: 240, margin: 1, color: { dark: "#111827", light: "#ffffff" } }).then(setQr); }, [asset.id]);
-  return <><button className="drawer-backdrop" aria-label="Close asset details" onClick={onClose} /><aside className="drawer"><div className="drawer-head"><div><span>{asset.code}</span><h2>{asset.name}</h2></div><div className="drawer-head-actions"><button className="button button-danger" disabled={deleting} title={asset.employeeId ? "Permanently delete assigned asset" : "Permanently delete asset"} onClick={async () => { if (deleting) return; setDeleting(true); try { await onDelete(); } finally { setDeleting(false); } }}><Trash2 size={14} />{deleting ? "Deleting…" : "Delete"}</button><button className="button button-secondary" onClick={onEdit}><Pencil size={14} />Edit asset</button><button className="icon-button" aria-label="Close asset details" onClick={onClose}><X size={20} /></button></div></div><div className="drawer-body"><div className="asset-hero"><span className="asset-big-icon"><Monitor size={34} /></span><div><span className={statusClass(asset.status)}>{asset.status}</span><p>{asset.brand} · {asset.model}</p></div></div><section className="detail-section"><h3>Asset details</h3><div className="detail-grid"><label>Serial number<strong>{asset.serial}</strong></label><label>Condition<strong>{asset.condition}</strong></label><label>Category<strong>{asset.category}</strong></label><label>Type<strong>{asset.type}</strong></label>{Object.entries(asset.specs ?? {}).filter(([, value]) => value).map(([key, value]) => <label key={key}>{specLabel(key)}<strong>{value}</strong></label>)}</div><p className="spec-box">{asset.details || "No additional notes recorded."}</p></section><section className="detail-section"><h3>Current custodian</h3>{employee ? <div className="owner-card"><span>{initials(employee.name)}</span><div><strong>{employee.name}</strong><small>{employee.empNo} · {employee.department}</small><a href={`mailto:${employee.email}`}>{employee.email}</a></div></div> : <div className="empty-owner"><Package size={21} />Available in central stock</div>}</section><section className="detail-section qr-section"><div><h3>Live QR label</h3><p>Print and attach this code. Scanning always opens the latest asset record.</p><button className="button button-secondary" onClick={() => window.print()}><Printer size={16} />Print label</button></div>{qr && <img src={qr} alt={`QR code for ${asset.code}`} />}</section><section className="detail-section"><h3>History</h3><div className="mini-history">{movements.length ? movements.map((movement) => <div key={movement.id}><i /><div><strong>{movement.type}</strong><p>{employeeMap[movement.employeeId]?.name} · {movement.note}</p><small>{new Date(movement.date).toLocaleDateString("en-GB")}</small></div></div>) : <p className="muted">No previous movements.</p>}</div></section></div></aside></>;
+  return <><button className="drawer-backdrop" aria-label="Close asset details" onClick={onClose} /><aside className="drawer"><div className="drawer-head"><div><span>{asset.code}</span><h2>{asset.name}</h2></div><button className="icon-button" onClick={onClose}><X size={20} /></button></div><div className="drawer-body"><div className="asset-hero"><span className="asset-big-icon"><Monitor size={34} /></span><div><span className={statusClass(asset.status)}>{asset.status}</span><p>{asset.brand} · {asset.model}</p></div></div><section className="detail-section"><h3>Asset details</h3><div className="detail-grid">{asset.category === "IT Asset" ? <label>Serial number<strong>{asset.serial || "Not recorded"}</strong></label> : <label>Current location<strong>{asset.location || asset.custodianDepartment || "Not recorded"}</strong></label>}<label>Condition<strong>{asset.condition}</strong></label><label>Category<strong>{asset.category}</strong></label><label>Type<strong>{asset.type}</strong></label>{Object.entries(asset.specs ?? {}).filter(([, value]) => value).map(([key, value]) => <label key={key}>{specLabel(key)}<strong>{value}</strong></label>)}</div><p className="spec-box">{asset.details || "No additional notes recorded."}</p></section><section className="detail-section"><h3>Current custodian</h3>{employee ? <div className="owner-card"><span>{initials(employee.name)}</span><div><strong>{employee.name}</strong><small>{employee.empNo} · {employee.department}</small><a href={`mailto:${employee.email}`}>{employee.email}</a></div></div> : <div className="empty-owner"><Package size={21} />Available at {asset.location || "central stock"}</div>}</section><section className="detail-section qr-section"><div><h3>Live QR label</h3><p>Print and attach this code. Scanning always opens the latest asset record.</p><button className="button button-secondary" onClick={() => window.print()}><Printer size={16} />Print label</button></div>{qr && <img src={qr} alt={`QR code for ${asset.code}`} />}</section><section className="detail-section"><h3>History</h3><div className="mini-history">{movements.length ? movements.map((movement) => <div key={movement.id}><i /><div><strong>{movement.type}</strong><p>{employeeMap[movement.employeeId]?.name} · {movement.note}</p><small>{new Date(movement.date).toLocaleDateString("en-GB")}</small></div></div>) : <p className="muted">No previous movements.</p>}</div></section></div></aside></>;
 }
 
 function Modal({ title, children, onClose, wide = false }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   return <div className="modal-backdrop"><section className={wide ? "modal modal-wide" : "modal"}><div className="modal-head"><div><span>ASSETFLOW</span><h2>{title}</h2></div><button className="icon-button" onClick={onClose}><X size={20} /></button></div><div className="modal-body">{children}</div></section></div>;
 }
 
-function AssetForm({ onSave, initial }: { onSave: (asset: Asset) => void | Promise<void>; initial?: Asset }) {
-  const [form, setForm] = useState({ category: initial?.category ?? "IT Asset", type: initial?.type ?? "Laptop", name: initial?.name ?? "", brand: initial?.brand ?? "", model: initial?.model ?? "", serial: initial?.serial ?? "", condition: initial?.condition ?? "Excellent", details: initial?.details ?? "" });
-  const [specs, setSpecs] = useState<Record<string, string>>(initial?.specs ?? {});
-  const [saving, setSaving] = useState(false);
+function AssetForm({ departments, onSave }: { departments: string[]; onSave: (asset: Asset) => void }) {
+  const [form, setForm] = useState({ category: "IT Asset", type: "Laptop", name: "", brand: "", model: "", serial: "", location: departments[0] ?? "", condition: "Excellent", details: "" });
+  const [specs, setSpecs] = useState<Record<string, string>>({});
   const field = (key: keyof typeof form) => ({ value: form[key], onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm({ ...form, [key]: event.target.value }) });
   const category = form.category as keyof typeof ASSET_TYPES;
-  const typeOptions = useMemo(() => {
-    const options: string[] = [...ASSET_TYPES[category]];
-    if (initial?.category === category && !options.includes(initial.type)) options.push(initial.type);
-    return options;
-  }, [category, initial]);
   const dynamicFields = ASSET_SPEC_FIELDS[form.type] ?? [];
-  const nonItModels = form.category === "Non-IT Asset" && form.type !== "Other"
-    ? NON_IT_ITEM_MODELS[form.type as keyof typeof NON_IT_ITEM_MODELS]
-    : null;
-  return <form className="form-grid" onSubmit={async (event) => { event.preventDefault(); if (saving) return; setSaving(true); const prefix = form.category === "IT Asset" ? "IT" : "NIT"; try { await onSave({ ...initial, id: initial?.id ?? crypto.randomUUID(), code: initial?.code ?? `${prefix}-${form.type.slice(0, 3).toUpperCase()}-${String(Date.now()).slice(-4)}`, ...form, specs, category: form.category as Asset["category"], status: initial?.status ?? "Available", updatedAt: today() }); } finally { setSaving(false); } }}>
-    <label>Asset category<select value={form.category} onChange={(event) => { const nextCategory = event.target.value as keyof typeof ASSET_TYPES; setForm({ ...form, category: nextCategory, type: ASSET_TYPES[nextCategory][0], model: "" }); setSpecs({}); }}><option>IT Asset</option><option>Non-IT Asset</option></select></label>
-    <label>Item type<select value={form.type} onChange={(event) => { setForm({ ...form, type: event.target.value, model: "" }); setSpecs({}); }}>{typeOptions.map((type) => <option key={type}>{type}</option>)}</select></label>
+  const isNonIt = form.category === "Non-IT Asset";
+  return <form className="form-grid" onSubmit={(event) => { event.preventDefault(); const prefix = form.category === "IT Asset" ? "IT" : "NIT"; onSave({ id: crypto.randomUUID(), code: `${prefix}-${form.type.slice(0, 3).toUpperCase()}-${String(Date.now()).slice(-4)}`, ...form, serial: isNonIt ? "" : form.serial, location: isNonIt ? form.location : undefined, specs, category: form.category as Asset["category"], status: "Available", updatedAt: today() }); }}>
+    <label>Asset category<select value={form.category} onChange={(event) => { const nextCategory = event.target.value as keyof typeof ASSET_TYPES; setForm({ ...form, category: nextCategory, type: ASSET_TYPES[nextCategory][0], serial: nextCategory === "Non-IT Asset" ? "" : form.serial }); setSpecs({}); }}><option>IT Asset</option><option>Non-IT Asset</option></select></label>
+    <label>Item type<select value={form.type} onChange={(event) => { setForm({ ...form, type: event.target.value }); setSpecs({}); }}>{ASSET_TYPES[category].map((type) => <option key={type}>{type}</option>)}</select></label>
     <label className="full">Display name<input required placeholder="e.g. Lenovo ThinkPad E14" {...field("name")} /></label>
     <label>Brand<input required placeholder="Lenovo" {...field("brand")} /></label>
-    {form.category === "Non-IT Asset"
-      ? <label>{form.type === "Other" ? "Other item" : `${form.type} model`}
-        {nonItModels
-          ? <select required {...field("model")}><option value="">Select {form.type.toLowerCase()} model</option>{nonItModels.map((model) => <option key={model}>{model}</option>)}</select>
-          : <input required placeholder="Enter the other item type" {...field("model")} />}
-      </label>
-      : <label>Model<input required placeholder="ThinkPad E14 Gen 5" {...field("model")} /></label>}
-    <label className="full">Serial number<input required placeholder="Manufacturer or company serial number" {...field("serial")} /></label>
+    <label>Model<input required placeholder="ThinkPad E14 Gen 5" {...field("model")} /></label>
+    {isNonIt ? <label className="full">Current location<select required {...field("location")}>{departments.map((department) => <option key={department}>{department}</option>)}</select></label> : <label className="full">Serial number<input required placeholder="Manufacturer or company serial number" {...field("serial")} /></label>}
     {dynamicFields.length > 0 && <div className="asset-spec-heading full"><strong>{form.type} specifications</strong><span>Fields change automatically for the selected asset type.</span></div>}
     {dynamicFields.map((spec) => <label key={spec.key}>{spec.label}{spec.options ? <select required value={specs[spec.key] ?? ""} onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })}><option value="">Select {spec.label.toLowerCase()}</option>{spec.options.map((option) => <option key={option}>{option}</option>)}</select> : <input required value={specs[spec.key] ?? ""} placeholder={spec.placeholder} onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })} />}</label>)}
     <label>Condition<select {...field("condition")}><option>Excellent</option><option>Good</option><option>Fair</option><option>Repair</option></select></label>
     <label className="full">Additional notes<textarea placeholder="Warranty, accessories or any other information…" {...field("details")} /></label>
-    <FormActions text={saving ? "Saving asset…" : initial ? "Update asset" : "Add asset"} disabled={saving} />
+    <FormActions text="Add asset" />
   </form>;
 }
 
-function EmployeeForm({ departments, onSave, initial }: { departments: string[]; onSave: (employee: Employee) => void | Promise<void>; initial?: Employee }) {
-  const departmentOptions = useMemo(() => {
-    const options = departments.map((item) => item.trim()).filter(Boolean);
-    const current = initial?.department?.trim();
-    if (current && !options.some((item) => item.toLowerCase() === current.toLowerCase())) options.push(current);
-    return options;
-  }, [departments, initial?.department]);
-  const [form, setForm] = useState({ name: initial?.name ?? "", empNo: initial?.empNo ?? "", email: initial?.email ?? "", department: initial?.department?.trim() ?? departmentOptions[0] ?? "", designation: initial?.designation ?? "", status: initial?.status ?? "Active" });
-  const [saving, setSaving] = useState(false);
-  const selectedDepartment = departmentOptions.includes(form.department) ? form.department : departmentOptions[0] ?? "";
+function EmployeeForm({ departments, onSave, initial }: { departments: string[]; onSave: (employee: Employee) => void; initial?: Employee }) {
+  const [form, setForm] = useState({ name: initial?.name ?? "", empNo: initial?.empNo ?? "", email: initial?.email ?? "", department: initial?.department ?? departments[0] ?? "", designation: initial?.designation ?? "", status: initial?.status ?? "Active" });
   const field = (key: keyof typeof form) => ({ value: form[key], onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [key]: event.target.value }) });
-  return <form className="form-grid" onSubmit={async (event) => { event.preventDefault(); if (!selectedDepartment || saving) return; setSaving(true); try { await onSave({ id: initial?.id ?? crypto.randomUUID(), ...form, department: selectedDepartment.trim(), status: form.status as Employee["status"] }); } finally { setSaving(false); } }}><label className="full">Full name<input required placeholder="Employee full name" {...field("name")} /></label><label>Employee number<input required placeholder="EMP-0001" {...field("empNo")} /></label><label>Email<input required type="email" placeholder="name@company.lk" {...field("email")} /></label><label>Department<select required value={selectedDepartment} onChange={(event) => setForm({ ...form, department: event.target.value })}>{departmentOptions.map((item) => <option value={item} key={item}>{item}</option>)}</select></label><label>Designation<input required placeholder="Job title" {...field("designation")} /></label><label>Employment status<select {...field("status")}><option>Active</option><option>Resigned</option></select></label><FormActions text={saving ? "Saving employee…" : initial ? "Update employee" : "Add employee"} disabled={saving || !selectedDepartment} /></form>;
+  return <form className="form-grid" onSubmit={(event) => { event.preventDefault(); onSave({ id: initial?.id ?? crypto.randomUUID(), ...form, status: form.status as Employee["status"] }); }}><label className="full">Full name<input required placeholder="Employee full name" {...field("name")} /></label><label>Employee number<input required placeholder="EMP-0001" {...field("empNo")} /></label><label>Email<input required type="email" placeholder="name@company.lk" {...field("email")} /></label><label>Department<select {...field("department")}>{departments.map((item) => <option key={item}>{item}</option>)}</select></label><label>Designation<input required placeholder="Job title" {...field("designation")} /></label><label>Employment status<select {...field("status")}><option>Active</option><option>Resigned</option></select></label><FormActions text={initial ? "Update employee" : "Add employee"} /></form>;
 }
 
 function AssignForm({ assets, employees, onSave }: { assets: Asset[]; employees: Employee[]; onSave: (assetIds: string[], employeeId: string) => void }) {
@@ -693,15 +638,14 @@ function RepairForm({ assets, onSave }: { assets: Asset[]; onSave: (assetId: str
   </form>;
 }
 
-function DepartmentManager({ departments, employees, onSave }: { departments: string[]; employees: Employee[]; onSave: (items: string[]) => void | Promise<void> }) {
+function DepartmentManager({ departments, employees, onSave }: { departments: string[]; employees: Employee[]; onSave: (items: string[]) => void }) {
   const [items, setItems] = useState(departments);
   const [newDepartment, setNewDepartment] = useState("");
-  const [saving, setSaving] = useState(false);
-  return <form onSubmit={async (event) => { event.preventDefault(); if (saving) return; setSaving(true); try { await onSave(items.map((item) => item.trim()).filter(Boolean)); } finally { setSaving(false); } }}>
+  return <form onSubmit={(event) => { event.preventDefault(); onSave(items.map((item) => item.trim()).filter(Boolean)); }}>
     <div className="department-add"><label>New department<input value={newDepartment} placeholder="e.g. Quality Assurance Dept" onChange={(event) => setNewDepartment(event.target.value)} /></label><button className="button button-secondary" type="button" disabled={!newDepartment.trim()} onClick={() => { const next = newDepartment.trim(); if (next && !items.some((item) => item.toLowerCase() === next.toLowerCase())) setItems([...items, next]); setNewDepartment(""); }}><Plus size={16} />Add department</button></div>
     <div className="department-editor">{items.map((department, index) => { const employeeCount = employees.filter((employee) => employee.department === department).length; return <div key={`${department}-${index}`}><input aria-label={`Department ${index + 1}`} value={department} onChange={(event) => setItems((rows) => rows.map((row, rowIndex) => rowIndex === index ? event.target.value : row))} /><span>{employeeCount} employee{employeeCount === 1 ? "" : "s"}</span><button type="button" disabled={employeeCount > 0 || items.length === 1} onClick={() => setItems((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}>Remove</button></div>; })}</div>
     <p className="department-note">Departments with employees cannot be removed until those employees are moved to another department. Renaming a department does not change historical reports.</p>
-    <FormActions text={saving ? "Saving departments…" : "Save departments"} disabled={saving || !items.length || items.some((item) => !item.trim())} />
+    <FormActions text="Save departments" disabled={!items.length || items.some((item) => !item.trim())} />
   </form>;
 }
 
@@ -734,7 +678,7 @@ function QrBatch({ assets, employeeMap }: { assets: Asset[]; employeeMap: Record
     </div>
     <div className="qr-batch-tip"><QrCode size={19} /><div><strong>Fast method for 100+ labels</strong><p>Filter a group, select all, then print on A4 adhesive label sheets. AssetFlow automatically arranges 24 labels per page; no one-by-one printing.</p></div></div>
     <div className="qr-select-list">{filtered.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial}</small></span><em>{asset.employeeId ? employeeMap[asset.employeeId]?.name : "In stock"}</em></label>)}</div>
-    <section className="qr-print-sheet">{visible.map((asset) => <QrLabel key={asset.id} asset={asset} owner={asset.employeeId ? employeeMap[asset.employeeId]?.name : undefined} />)}</section>
+    <section className="qr-print-sheet">{Array.from({ length: Math.ceil(visible.length / 24) }, (_, pageIndex) => <div className="qr-print-page" key={pageIndex}>{visible.slice(pageIndex * 24, pageIndex * 24 + 24).map((asset) => <QrLabel key={asset.id} asset={asset} owner={asset.employeeId ? employeeMap[asset.employeeId]?.name : undefined} />)}</div>)}</section>
   </div>;
 }
 
@@ -748,7 +692,7 @@ function QrLabel({ asset, owner }: { asset: Asset; owner?: string }) {
       color: { dark: "#171422", light: "#ffffff" },
     }).then(setSrc);
   }, [asset.id]);
-  return <article className="qr-label"><div className="qr-label-brand"><ShieldCheck size={13} /><strong>ASSETFLOW</strong></div>{src && <img src={src} alt="" />}<div><strong>{asset.name}</strong><span>{asset.code}</span><small>{asset.serial}</small><em>{owner || "IT Department stock"}</em></div></article>;
+  return <article className="qr-label"><div className="qr-label-brand"><ShieldCheck size={13} /><strong>ASSETFLOW</strong></div>{src && <img src={src} alt="" />}<div><strong>{asset.name}</strong><span>{asset.code}</span><small>{asset.serial || asset.location || "No serial number"}</small><em>{owner || asset.location || "IT Department stock"}</em></div></article>;
 }
 
 function ScheduleForm({ value, onSave }: { value: RequirementWindowRecord; onSave: (next: RequirementWindowRecord) => void }) {
@@ -789,5 +733,5 @@ function FormActions({ text, disabled = false }: { text: string; disabled?: bool
 }
 
 function modalTitle(modal: string) {
-  return { asset: "Add a new asset", assetEdit: "Edit asset details", employee: "Add employee", employeeEdit: "Edit employee details", departments: "Manage departments", assign: "Assign assets", return: "Return assets", repair: "Record asset repair", request: "Submit requirement", document: "Generate document", qrBatch: "Batch QR label printing", schedule: "Requirement form window" }[modal] || modal;
+  return { asset: "Add a new asset", employee: "Add employee", employeeEdit: "Edit employee details", departments: "Manage departments", assign: "Assign assets", return: "Return assets", repair: "Record asset repair", request: "Submit requirement", document: "Generate document", qrBatch: "Batch QR label printing", schedule: "Requirement form window" }[modal] || modal;
 }
