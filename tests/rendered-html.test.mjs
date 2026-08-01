@@ -138,4 +138,8 @@ test("prints QR label documents by live department", async () => {
   assert.match(page, /QR LABEL REGISTER/);
   assert.match(page, /<h1>\{printDepartment\}<\/h1>/);
   assert.match(css, /\.qr-label-grid/);
+  assert.match(css, /\.modal-backdrop \{ position: static !important/);
+  assert.match(css, /\.qr-print-sheet \{ display: block !important; position: static !important/);
+  assert.match(css, /\.qr-print-page \{ position: relative; width: 210mm; height: 296mm/);
+  assert.match(css, /break-inside: avoid-page; page-break-inside: avoid/);
 });
