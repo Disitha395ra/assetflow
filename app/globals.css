@@ -538,4 +538,22 @@ select.status { appearance: none; cursor: pointer; padding-right: 8px; }
   .qr-label > div:last-child small, .qr-label > div:last-child em { display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .qr-label > div:last-child small { color: #555; font-size: 5.2pt; margin-top: .7mm; }
   .qr-label > div:last-child em { color: #777; font-size: 5.2pt; font-style: normal; margin-top: .7mm; }
+  .qr-size-compact .qr-label-grid { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(10, 25.2mm); }
+  .qr-size-compact .qr-label { height: 25.2mm; grid-template-columns: 15mm minmax(0, 1fr); grid-template-rows: 4mm 1fr; column-gap: 1.3mm; padding: 1.3mm; }
+  .qr-size-compact .qr-label-brand { font-size: 5pt; }
+  .qr-size-compact .qr-label-brand svg { width: 9px; height: 9px; }
+  .qr-size-compact .qr-label img { width: 14mm; height: 14mm; }
+  .qr-size-compact .qr-label > div:last-child strong { font-size: 6pt; max-height: 13pt; }
+  .qr-size-compact .qr-label > div:last-child span { font-size: 6pt; margin-top: .8mm; }
+  .qr-size-compact .qr-label > div:last-child small, .qr-size-compact .qr-label > div:last-child em { font-size: 4.5pt; margin-top: .4mm; }
+  .qr-size-cable .qr-label-grid { grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(12, 20.66mm); }
+  .qr-size-cable .qr-label { position: relative; height: 20.66mm; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; gap: 2mm; padding: 1mm; }
+  .qr-cable-code, .qr-cable-details { min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
+  .qr-cable-code img { width: 14mm !important; height: 14mm !important; }
+  .qr-cable-code span { color: #5f45ca; font-size: 4.5pt; font-weight: 800; margin-top: .3mm; }
+  .qr-cable-label > i { position: absolute; left: 50%; top: .8mm; bottom: .8mm; width: 0; border-left: .25mm dotted #999; color: #999; font-size: 3.5pt; font-style: normal; line-height: 1; padding-top: 1mm; writing-mode: vertical-rl; }
+  .qr-cable-details { align-items: flex-start; }
+  .qr-cable-details strong { color: #5d43c8; font-size: 5pt; }
+  .qr-cable-details span { color: #222; font-size: 6pt; font-weight: 800; margin-top: 1mm; }
+  .qr-cable-details small, .qr-cable-details em { display: block; max-width: 100%; color: #666; font-size: 4.3pt; font-style: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: .6mm; }
 }

@@ -143,3 +143,22 @@ test("prints QR label documents by live department", async () => {
   assert.match(css, /\.qr-print-page \{ position: relative; width: 210mm; height: 296mm/);
   assert.match(css, /break-inside: avoid-page; page-break-inside: avoid/);
 });
+
+test("offers practical QR sizes for large, small and cable assets", async () => {
+  const [page, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /standard: \{ label: "Standard", perPage: 24/);
+  assert.match(page, /compact: \{ label: "Compact", perPage: 40/);
+  assert.match(page, /cable: \{ label: "Cable flag", perPage: 48/);
+  assert.match(page, /For a SIM, attach this label to its holder or envelope, never over the SIM contacts/);
+  assert.match(page, /wrap its centre around an earphone or cable/);
+  assert.match(page, /qr-size-\$\{labelFormat\}/);
+  assert.match(page, /format=\{labelFormat\}/);
+  assert.match(page, /qr-cable-label/);
+  assert.match(css, /\.qr-size-compact \.qr-label-grid/);
+  assert.match(css, /\.qr-size-cable \.qr-label-grid/);
+  assert.match(css, /\.qr-cable-label > i/);
+});

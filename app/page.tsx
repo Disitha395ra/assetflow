@@ -737,9 +737,17 @@ function PrintableDocument({ type, employees, assets, initialEmployeeId = "", in
   return <div><div className="document-controls"><label>Employee<select value={employeeId} disabled={Boolean(initialEmployeeId)} onChange={(event) => { const nextId = event.target.value; setEmployeeId(nextId); setSelected(assets.filter((asset) => asset.employeeId === nextId).map((asset) => asset.id)); }}>{employees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><button className="button button-primary" disabled={!employee || !included.length} onClick={() => window.print()}><Printer size={17} />Print / Save PDF</button></div><div className="document-item-picker"><div><strong>Select items for this document</strong><span>{selected.length} of {owned.length} included</span></div><div>{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} />{asset.name}<small>{asset.code}</small></label>)}</div></div><article className="print-document"><div className="document-accent" /><header><div><strong>ASSETFLOW</strong><span>Company Asset Management · Official Record</span></div><p>{type}</p></header><div className="document-title"><span>{type.toUpperCase()}</span><h1>{employee?.name || "Select an employee"}</h1><p>{employee ? `${employee.empNo} · ${employee.designation} · ${employee.department}` : "No employee selected"}</p></div><div className="document-meta"><span>Document date<strong>{new Date().toLocaleDateString("en-GB")}</strong></span><span>Reference<strong>AF-{employee?.empNo || "UNASSIGNED"}-{type.replaceAll(" ", "-").toUpperCase()}</strong></span><span>Items covered<strong>{included.length}</strong></span></div><table><thead><tr><th>#</th><th>Asset / item</th><th>Asset code</th><th>Serial / location</th><th>Condition</th></tr></thead><tbody>{included.map((asset, index) => <tr key={asset.id}><td>{String(index + 1).padStart(2, "0")}</td><td><strong>{asset.name}</strong><small>{asset.details}</small></td><td>{asset.code}</td><td>{asset.serial || asset.location || "—"}</td><td><span className="document-condition">{asset.condition}</span></td></tr>)}</tbody></table><p className="document-statement">{returnDocument ? "The assets listed above have been returned to the company and verified by the responsible department. Any exception or damage must be recorded before final employee clearance is approved." : "I acknowledge receipt and responsibility for the company assets listed above. I agree to use them only for authorised company work, take reasonable care of them, and return them in good condition when requested."}</p><div className="signature-grid"><span>Employee signature<small>Name, signature & date</small></span><span>Issued / received by<small>IT Department</small></span><span>Authorised by<small>Department Head</small></span></div><footer><strong>AssetFlow verified document</strong><span>Generated from the live company asset register · {new Date().toLocaleString("en-GB")}</span></footer></article></div>;
 }
 
+const QR_LABEL_FORMATS = {
+  standard: { label: "Standard", perPage: 24, guidance: "Best for laptops, monitors, tables and other assets with a flat surface." },
+  compact: { label: "Compact", perPage: 40, guidance: "Best for a mouse, charger or adapter. For a SIM, attach this label to its holder or envelope, never over the SIM contacts." },
+  cable: { label: "Cable flag", perPage: 48, guidance: "Cut the label, wrap its centre around an earphone or cable, then press the two adhesive halves together." },
+} as const;
+type QrLabelFormat = keyof typeof QR_LABEL_FORMATS;
+
 function QrBatch({ assets, employeeMap, departments }: { assets: Asset[]; employeeMap: Record<string, Employee>; departments: string[] }) {
   const [category, setCategory] = useState("All");
   const [department, setDepartment] = useState("All");
+  const [labelFormat, setLabelFormat] = useState<QrLabelFormat>("standard");
   const assetDepartment = (asset: Asset) => asset.employeeId
     ? employeeMap[asset.employeeId]?.department || asset.custodianDepartment || "IT Dept"
     : asset.location || asset.custodianDepartment || "IT Dept";
@@ -755,22 +763,25 @@ function QrBatch({ assets, employeeMap, departments }: { assets: Asset[]; employ
   const [selected, setSelected] = useState<string[]>(assets.map((asset) => asset.id));
   const visible = filtered.filter((asset) => selected.includes(asset.id));
   const printDepartment = department === "All" ? "All departments" : department;
+  const format = QR_LABEL_FORMATS[labelFormat];
+  const pageCount = Math.ceil(visible.length / format.perPage);
   return <div className="qr-batch">
     <div className="qr-batch-toolbar">
       <div className="qr-batch-filters">
         <label>Department<select value={department} onChange={(event) => setDepartment(event.target.value)}><option value="All">All departments</option>{departmentOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         <label>Asset group<select value={category} onChange={(event) => setCategory(event.target.value)}><option>All</option><option>IT Asset</option><option>Non-IT Asset</option></select></label>
+        <label>Label size<select value={labelFormat} onChange={(event) => setLabelFormat(event.target.value as QrLabelFormat)}><option value="standard">Standard · 24 labels per page</option><option value="compact">Compact · 40 labels per page</option><option value="cable">Cable flag · 48 labels per page</option></select></label>
       </div>
       <div><button className="button button-secondary" onClick={() => setSelected((rows) => filtered.every((asset) => rows.includes(asset.id)) ? rows.filter((id) => !filtered.some((asset) => asset.id === id)) : Array.from(new Set([...rows, ...filtered.map((asset) => asset.id)])))}><Check size={16} />Select / clear group</button><button className="button button-primary" disabled={!visible.length} onClick={() => window.print()}><Printer size={17} />Print {visible.length} labels</button></div>
     </div>
-    <div className="qr-batch-tip"><QrCode size={19} /><div><strong>Print all labels or prepare a department document</strong><p>Select a live department and optional asset group, then print on A4 adhesive label sheets with 24 labels per page. New departments added in AssetFlow automatically appear here.</p></div></div>
-    <div className="qr-batch-summary"><strong>{printDepartment}</strong><span>{filtered.length} matching assets · {visible.length} selected for printing</span></div>
+    <div className="qr-batch-tip"><QrCode size={19} /><div><strong>{format.label} labels · {format.perPage} per A4 page</strong><p>{format.guidance} Keep the printed QR flat, clean and unobstructed for reliable scanning.</p></div></div>
+    <div className="qr-batch-summary"><strong>{printDepartment}</strong><span>{filtered.length} matching assets · {visible.length} selected · {format.label} format</span></div>
     <div className="qr-select-list">{filtered.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial || asset.location || "No serial"}</small></span><em>{asset.employeeId ? employeeMap[asset.employeeId]?.name : assetDepartment(asset)}</em></label>)}</div>
-    <section className="qr-print-sheet">{Array.from({ length: Math.ceil(visible.length / 24) }, (_, pageIndex) => <div className="qr-print-page" key={pageIndex}><header><div><strong>ASSETFLOW · QR LABEL REGISTER</strong><h1>{printDepartment}</h1></div><span>Page {pageIndex + 1} of {Math.ceil(visible.length / 24)}<small>{visible.length} labels</small></span></header><div className="qr-label-grid">{visible.slice(pageIndex * 24, pageIndex * 24 + 24).map((asset) => <QrLabel key={asset.id} asset={asset} owner={asset.employeeId ? `${employeeMap[asset.employeeId]?.name || "Assigned"} · ${assetDepartment(asset)}` : assetDepartment(asset)} />)}</div></div>)}</section>
+    <section className={`qr-print-sheet qr-size-${labelFormat}`}>{Array.from({ length: pageCount }, (_, pageIndex) => <div className="qr-print-page" key={pageIndex}><header><div><strong>ASSETFLOW · QR LABEL REGISTER</strong><h1>{printDepartment}</h1></div><span>{format.label} · Page {pageIndex + 1} of {pageCount}<small>{visible.length} labels</small></span></header><div className="qr-label-grid">{visible.slice(pageIndex * format.perPage, pageIndex * format.perPage + format.perPage).map((asset) => <QrLabel key={asset.id} asset={asset} format={labelFormat} owner={asset.employeeId ? `${employeeMap[asset.employeeId]?.name || "Assigned"} · ${assetDepartment(asset)}` : assetDepartment(asset)} />)}</div></div>)}</section>
   </div>;
 }
 
-function QrLabel({ asset, owner }: { asset: Asset; owner?: string }) {
+function QrLabel({ asset, owner, format }: { asset: Asset; owner?: string; format: QrLabelFormat }) {
   const [src, setSrc] = useState("");
   useEffect(() => {
     QRCode.toDataURL(`${window.location.origin}/asset/${asset.id}`, {
@@ -780,6 +791,7 @@ function QrLabel({ asset, owner }: { asset: Asset; owner?: string }) {
       color: { dark: "#171422", light: "#ffffff" },
     }).then(setSrc);
   }, [asset.id]);
+  if (format === "cable") return <article className="qr-label qr-cable-label"><div className="qr-cable-code">{src && <img src={src} alt="" />}<span>{asset.code}</span></div><i aria-hidden="true">FOLD</i><div className="qr-cable-details"><strong>ASSETFLOW</strong><span>{asset.code}</span><small>{asset.name}</small><em>{owner || "IT stock"}</em></div></article>;
   return <article className="qr-label"><div className="qr-label-brand"><ShieldCheck size={13} /><strong>ASSETFLOW</strong></div>{src && <img src={src} alt="" />}<div><strong>{asset.name}</strong><span>{asset.code}</span><small>{asset.serial || asset.location || "No serial number"}</small><em>{owner || asset.location || "IT Department stock"}</em></div></article>;
 }
 
