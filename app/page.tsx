@@ -42,6 +42,7 @@ import QRCode from "qrcode";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ADMIN_EMAIL,
+  ADMIN_EMAILS,
   DEFAULT_REQUIREMENT_WINDOW,
   deleteAssetRecord,
   firebaseReady,
@@ -50,6 +51,7 @@ import {
   saveRequirementWindow,
   signInAsAdmin,
   signOutAdmin,
+  isAdminEmail,
   watchAuth,
   watchCollection,
   watchRequirementWindow,
@@ -172,7 +174,7 @@ export default function Home() {
       const email = user?.email?.toLowerCase() ?? "";
       setSignedInEmail(email);
       if (!user) setAdminState("signed-out");
-      else setAdminState(email === ADMIN_EMAIL ? "admin" : "denied");
+      else setAdminState(isAdminEmail(email) ? "admin" : "denied");
     });
   }, []);
 
@@ -830,7 +832,8 @@ function ScheduleForm({ value, onSave }: { value: RequirementWindowRecord; onSav
 }
 
 function AdminGate({ state, email, onSignIn, onSignOut }: { state: "loading" | "signed-out" | "admin" | "denied"; email: string; onSignIn: () => void; onSignOut: () => void }) {
-  return <main className="admin-gate"><section><div className="admin-gate-brand"><ShieldCheck size={27} /><strong>AssetFlow</strong></div>{state === "loading" ? <><span className="gate-icon"><CircleDot size={27} /></span><h1>Verifying administrator…</h1></> : state === "denied" ? <><span className="gate-icon denied"><LockKeyhole size={27} /></span><h1>Dashboard access restricted</h1><p><strong>{email}</strong> is signed in, but only <strong>{ADMIN_EMAIL}</strong> can access company asset controls.</p><button className="button button-primary" onClick={onSignOut}><LogOut size={17} />Sign out and switch account</button></> : <><span className="gate-icon"><LockKeyhole size={27} /></span><h1>Administrator sign in</h1><p>Asset records, employee data and management controls are restricted to <strong>{ADMIN_EMAIL}</strong>.</p><button className="button button-primary" onClick={onSignIn}><ShieldCheck size={17} />Continue with Google</button></>}<small>Public QR records and department requirement forms do not expose this dashboard.</small></section></main>;
+  const adminLabel = ADMIN_EMAILS.join(" or ");
+  return <main className="admin-gate"><section><div className="admin-gate-brand"><ShieldCheck size={27} /><strong>AssetFlow</strong></div>{state === "loading" ? <><span className="gate-icon"><CircleDot size={27} /></span><h1>Verifying administrator…</h1></> : state === "denied" ? <><span className="gate-icon denied"><LockKeyhole size={27} /></span><h1>Dashboard access restricted</h1><p><strong>{email}</strong> is signed in, but only <strong>{adminLabel}</strong> can access company asset controls.</p><button className="button button-primary" onClick={onSignOut}><LogOut size={17} />Sign out and switch account</button></> : <><span className="gate-icon"><LockKeyhole size={27} /></span><h1>Administrator sign in</h1><p>Asset records, employee data and management controls are restricted to <strong>{adminLabel}</strong>.</p><button className="button button-primary" onClick={onSignIn}><ShieldCheck size={17} />Continue with Google</button></>}<small>Public QR records and department requirement forms do not expose this dashboard.</small></section></main>;
 }
 
 function PageHead({ eyebrow, title, description, children }: { eyebrow: string; title: string; description: string; children?: React.ReactNode }) {

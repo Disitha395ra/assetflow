@@ -40,6 +40,11 @@ const app = firebaseReady
 export const db = app ? getFirestore(app) : null;
 export const auth = app ? getAuth(app) : null;
 export const ADMIN_EMAIL = "it@scot.lk";
+export const ADMIN_EMAILS = [ADMIN_EMAIL, "admin@scot.lk"] as const;
+
+export function isAdminEmail(email: string | null | undefined) {
+  return ADMIN_EMAILS.some((adminEmail) => adminEmail === email?.trim().toLowerCase());
+}
 
 export function watchAuth(callback: (user: User | null) => void) {
   if (!auth) {
@@ -154,7 +159,7 @@ export async function getRequirementWindow() {
   const departments = currentDepartments.length ? currentDepartments : legacyDepartments;
 
   // Recheck inside the transaction so legacy data cannot overwrite a newer list.
-  if (!currentDepartments.length && legacyDepartments.length && auth?.currentUser?.email === ADMIN_EMAIL) {
+  if (!currentDepartments.length && legacyDepartments.length && isAdminEmail(auth?.currentUser?.email)) {
     await runTransaction(db, async (transaction) => {
       const latestSnapshot = await transaction.get(windowRef);
       const latestDepartments = cleanDepartments(latestSnapshot.data()?.departments);

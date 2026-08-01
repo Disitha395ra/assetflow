@@ -14,18 +14,23 @@ test("starts with a clean Firebase-backed register", async () => {
   assert.match(page, /24 labels per page/);
 });
 
-test("ships public QR and requirement routes with restricted admin writes", async () => {
-  const [assetPage, requirementPage, rules] = await Promise.all([
+test("ships public routes while allowing both verified administrator accounts", async () => {
+  const [assetPage, requirementPage, rules, firebase, page] = await Promise.all([
     readFile(new URL("../app/asset/[id]/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/requirements/[slug]/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../firestore.rules", import.meta.url), "utf8"),
+    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(assetPage, /Verified company record/);
   assert.match(assetPage, /Lifecycle record/);
   assert.match(requirementPage, /SUBMISSIONS OPEN/);
   assert.match(requirementPage, /saveRecord\("requirements"/);
-  assert.match(rules, /request\.auth\.token\.email == "it@scot\.lk"/);
+  assert.match(rules, /request\.auth\.token\.email in \["it@scot\.lk", "admin@scot\.lk"\]/);
+  assert.match(firebase, /ADMIN_EMAILS = \[ADMIN_EMAIL, "admin@scot\.lk"\]/);
+  assert.match(firebase, /isAdminEmail\(auth\?\.currentUser\?\.email\)/);
+  assert.match(page, /setAdminState\(isAdminEmail\(email\) \? "admin" : "denied"\)/);
   assert.match(rules, /allow get: if true/);
 });
 
