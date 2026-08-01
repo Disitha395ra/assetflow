@@ -798,6 +798,18 @@ function QrBatch({ assets, employeeMap, departments, duplicateCount }: { assets:
   const [category, setCategory] = useState("All");
   const [department, setDepartment] = useState("All");
   const [labelFormat, setLabelFormat] = useState<QrLabelFormat>("standard");
+  const qrSelectionKey = (asset: Asset) => asset.employeeId
+    ? [asset.employeeId, asset.category, asset.type, asset.name, asset.brand, asset.model].map((value) => value.trim().toLowerCase()).join("|")
+    : `asset:${asset.id}`;
+  const uniqueQrAssets = (rows: Asset[]) => {
+    const seen = new Set<string>();
+    return rows.filter((asset) => {
+      const key = qrSelectionKey(asset);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
   const assetDepartment = (asset: Asset) => asset.employeeId
     ? employeeMap[asset.employeeId]?.department || asset.custodianDepartment || "IT Dept"
     : asset.location || asset.custodianDepartment || "IT Dept";
@@ -810,7 +822,11 @@ function QrBatch({ assets, employeeMap, departments, duplicateCount }: { assets:
     (category === "All" || asset.category === category) &&
     (department === "All" || assetDepartment(asset).toLowerCase() === department.toLowerCase()),
   );
-  const [selected, setSelected] = useState<string[]>(assets.map((asset) => asset.id));
+  const preferredQrAssets = uniqueQrAssets(assets);
+  const preferredQrIds = new Set(preferredQrAssets.map((asset) => asset.id));
+  const preferredFiltered = uniqueQrAssets(filtered);
+  const possibleDuplicateNames = assets.length - preferredQrAssets.length;
+  const [selected, setSelected] = useState<string[]>(() => preferredQrAssets.map((asset) => asset.id));
   const visible = filtered.filter((asset) => selected.includes(asset.id));
   const printDepartment = department === "All" ? "All departments" : department;
   const format = QR_LABEL_FORMATS[labelFormat];
@@ -822,12 +838,13 @@ function QrBatch({ assets, employeeMap, departments, duplicateCount }: { assets:
         <label>Asset group<select value={category} onChange={(event) => setCategory(event.target.value)}><option>All</option><option>IT Asset</option><option>Non-IT Asset</option></select></label>
         <label>Label size<select value={labelFormat} onChange={(event) => setLabelFormat(event.target.value as QrLabelFormat)}><option value="standard">Standard · 24 labels per page</option><option value="compact">Compact · 40 labels per page</option><option value="cable">Cable flag · 48 labels per page</option></select></label>
       </div>
-      <div><button className="button button-secondary" onClick={() => setSelected((rows) => filtered.every((asset) => rows.includes(asset.id)) ? rows.filter((id) => !filtered.some((asset) => asset.id === id)) : Array.from(new Set([...rows, ...filtered.map((asset) => asset.id)])))}><Check size={16} />Select / clear group</button><button className="button button-primary" disabled={!visible.length} onClick={() => window.print()}><Printer size={17} />Print {visible.length} labels</button></div>
+      <div><button className="button button-secondary" onClick={() => setSelected((rows) => preferredFiltered.every((asset) => rows.includes(asset.id)) ? rows.filter((id) => !filtered.some((asset) => asset.id === id)) : Array.from(new Set([...rows, ...preferredFiltered.map((asset) => asset.id)])))}><Check size={16} />Select / clear unique</button><button className="button button-primary" disabled={!visible.length} onClick={() => window.print()}><Printer size={17} />Print {visible.length} labels</button></div>
     </div>
     <div className="qr-batch-tip"><QrCode size={19} /><div><strong>{format.label} labels · {format.perPage} per A4 page</strong><p>{format.guidance} Keep the printed QR flat, clean and unobstructed for reliable scanning.</p></div></div>
     {duplicateCount > 0 && <div className="qr-duplicate-note"><ShieldCheck size={16} /><span><strong>{duplicateCount} duplicate-serial records excluded</strong>QR sheets use one canonical asset ID per IT serial number. Review the Duplicate serials filter in Assets to remove incorrect legacy records.</span></div>}
+    {possibleDuplicateNames > 0 && <div className="qr-name-duplicate-note"><ShieldCheck size={16} /><span><strong>{possibleDuplicateNames} same-name assignments left unselected</strong>Records with the same employee, name, type, brand and model but different codes are treated as possible duplicates. Select an unchecked code manually only when it is a separate physical asset.</span></div>}
     <div className="qr-batch-summary"><strong>{printDepartment}</strong><span>{filtered.length} matching assets · {visible.length} selected · {format.label} format</span></div>
-    <div className="qr-select-list">{filtered.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial || asset.location || "No serial"}</small></span><em>{asset.employeeId ? employeeMap[asset.employeeId]?.name : assetDepartment(asset)}</em></label>)}</div>
+    <div className="qr-select-list">{filtered.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial || asset.location || "No serial"}</small></span><em className={preferredQrIds.has(asset.id) ? "" : "possible-duplicate"}>{preferredQrIds.has(asset.id) ? asset.employeeId ? employeeMap[asset.employeeId]?.name : assetDepartment(asset) : "Possible duplicate · verify code"}</em></label>)}</div>
     <section className={`qr-print-sheet qr-size-${labelFormat}`}>{Array.from({ length: pageCount }, (_, pageIndex) => <div className="qr-print-page" key={pageIndex}><header><div><strong>ASSETFLOW · QR LABEL REGISTER</strong><h1>{printDepartment}</h1></div><span>{format.label} · Page {pageIndex + 1} of {pageCount}<small>{visible.length} labels</small></span></header><div className="qr-label-grid">{visible.slice(pageIndex * format.perPage, pageIndex * format.perPage + format.perPage).map((asset) => <QrLabel key={asset.id} asset={asset} format={labelFormat} owner={asset.employeeId ? `${employeeMap[asset.employeeId]?.name || "Assigned"} · ${assetDepartment(asset)}` : assetDepartment(asset)} />)}</div></div>)}</section>
   </div>;
 }

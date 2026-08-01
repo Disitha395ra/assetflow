@@ -372,6 +372,10 @@ select.status { appearance: none; cursor: pointer; padding-right: 8px; }
 .qr-batch-summary span { color: #858b96; font-size: 8px; }
 .qr-duplicate-note { margin: -5px 0 12px; }
 .qr-duplicate-note span { display: block; }
+.qr-name-duplicate-note { display: flex; align-items: flex-start; gap: 9px; color: #5840b5; background: #f5f2ff; border: 1px solid #ded6ff; border-radius: 9px; padding: 10px 12px; margin: -5px 0 12px; font-size: 7.5px; line-height: 1.5; }
+.qr-name-duplicate-note svg { flex: 0 0 auto; margin-top: 1px; }
+.qr-name-duplicate-note strong, .qr-name-duplicate-note span { display: block; }
+.qr-name-duplicate-note strong { font-size: 9px; }
 .qr-select-list { max-height: 320px; overflow-y: auto; border: 1px solid #e3e5ea; border-radius: 10px; }
 .qr-select-list label { display: grid; grid-template-columns: 18px 1fr auto; gap: 9px; align-items: center; padding: 10px 11px; border-bottom: 1px solid #f0f1f4; cursor: pointer; }
 .qr-select-list input { accent-color: #6d4aff; }
@@ -379,6 +383,7 @@ select.status { appearance: none; cursor: pointer; padding-right: 8px; }
 .qr-select-list strong { font-size: 9px; }
 .qr-select-list small { color: #9499a4; font-size: 7px; margin-top: 3px; }
 .qr-select-list em { color: #6d7480; font-size: 7.5px; font-style: normal; }
+.qr-select-list em.possible-duplicate { color: #b54708; font-weight: 800; }
 .qr-print-sheet { display: none; }
 
 .admin-gate { min-height: 100vh; display: grid; place-items: center; background: radial-gradient(circle at 70% 15%, #6d4aff20, transparent 32%), #f6f7fb; padding: 20px; }

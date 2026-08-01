@@ -185,3 +185,21 @@ test("canonicalizes legacy duplicate IT serials across operational workflows", a
   assert.match(css, /\.duplicate-record/);
   assert.match(css, /\.duplicate-alert/);
 });
+
+test("does not preselect same-name QR records assigned to one employee", async () => {
+  const [page, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /const qrSelectionKey = \(asset: Asset\) => asset\.employeeId/);
+  assert.match(page, /asset\.employeeId, asset\.category, asset\.type, asset\.name, asset\.brand, asset\.model/);
+  assert.match(page, /const uniqueQrAssets = \(rows: Asset\[\]\)/);
+  assert.match(page, /const preferredQrAssets = uniqueQrAssets\(assets\)/);
+  assert.match(page, /useState<string\[\]>\(\(\) => preferredQrAssets\.map\(\(asset\) => asset\.id\)\)/);
+  assert.match(page, />Select \/ clear unique<\/button>/);
+  assert.match(page, /same-name assignments left unselected/);
+  assert.match(page, /Possible duplicate · verify code/);
+  assert.match(css, /\.qr-name-duplicate-note/);
+  assert.match(css, /em\.possible-duplicate/);
+});
