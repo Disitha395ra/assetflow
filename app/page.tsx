@@ -434,7 +434,7 @@ export default function Home() {
 
       {selectedAsset && <AssetDrawer asset={selectedAsset} employee={selectedAsset.employeeId ? employeeMap[selectedAsset.employeeId] : undefined} movements={movements.filter((row) => row.assetId === selectedAsset.id)} employeeMap={employeeMap} onEdit={() => { setEditingAsset(selectedAsset); setSelectedAsset(null); setModal("assetEdit"); }} onDelete={() => deleteAsset(selectedAsset)} onClose={() => setSelectedAsset(null)} />}
       {modal && (
-        <Modal title={modalTitle(modal)} wide={modal === "document"} onClose={() => setModal(null)}>
+        <Modal title={modalTitle(modal)} wide={modal === "document" || modal === "qrBatch"} onClose={() => setModal(null)}>
           {modal === "asset" && <AssetForm departments={departmentOptions} onSave={async (asset) => { await saveRecord("assets", asset); setAssets((rows) => [asset, ...rows.filter((row) => row.id !== asset.id)]); setModal(null); flash("Asset added to inventory"); }} />}
           {modal === "assetEdit" && editingAsset && <AssetForm departments={departmentOptions} initial={editingAsset} onSave={async (asset) => { await saveRecord("assets", asset); setAssets((rows) => rows.map((row) => row.id === asset.id ? asset : row)); setEditingAsset(null); setModal(null); setSelectedAsset(asset); flash("Asset details updated"); }} />}
           {modal === "employee" && <EmployeeForm departments={departmentOptions} onSave={async (employee) => { await saveRecord("employees", employee); setEmployees((rows) => [employee, ...rows]); setDepartment(employee.department); setModal(null); flash("Employee added"); }} />}
@@ -445,7 +445,7 @@ export default function Home() {
           {modal === "repair" && <RepairForm assets={assets} onSave={async (assetId, action, note) => { const asset = assets.find((row) => row.id === assetId); if (!asset) return; const nextStatus: AssetStatus = action === "start" ? "In repair" : asset.employeeId ? "Assigned" : "Available"; await updateAsset({ ...asset, status: nextStatus, condition: action === "start" ? "Repair" : "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId: asset.employeeId || "", type: "Repair", date: today(), note: `${action === "start" ? "Sent for repair" : "Repair completed"}: ${note}` }); setModal(null); flash(action === "start" ? "Repair record started" : "Repair completion recorded"); }} />}
           {modal === "request" && <RequestForm departments={departmentOptions} onSave={async (request) => { await saveRecord("requirements", request); setRequests((rows) => [request, ...rows]); setModal(null); flash("Requirement submitted"); }} />}
           {modal === "document" && <PrintableDocument type={documentType} employees={employees} assets={assets} initialEmployeeId={documentEmployeeId} initialAssetIds={documentAssetIds} />}
-          {modal === "qrBatch" && <QrBatch assets={assets} employeeMap={employeeMap} />}
+          {modal === "qrBatch" && <QrBatch assets={assets} employeeMap={employeeMap} departments={departmentOptions} />}
           {modal === "schedule" && <ScheduleForm value={requirementWindow} onSave={async (next) => { setRequirementWindow(next); await saveRequirementWindow(next); setModal(null); flash(next.isOpen ? "Requirement form opened" : "Requirement form closed"); }} />}
         </Modal>
       )}
@@ -737,19 +737,36 @@ function PrintableDocument({ type, employees, assets, initialEmployeeId = "", in
   return <div><div className="document-controls"><label>Employee<select value={employeeId} disabled={Boolean(initialEmployeeId)} onChange={(event) => { const nextId = event.target.value; setEmployeeId(nextId); setSelected(assets.filter((asset) => asset.employeeId === nextId).map((asset) => asset.id)); }}>{employees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><button className="button button-primary" disabled={!employee || !included.length} onClick={() => window.print()}><Printer size={17} />Print / Save PDF</button></div><div className="document-item-picker"><div><strong>Select items for this document</strong><span>{selected.length} of {owned.length} included</span></div><div>{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} />{asset.name}<small>{asset.code}</small></label>)}</div></div><article className="print-document"><div className="document-accent" /><header><div><strong>ASSETFLOW</strong><span>Company Asset Management · Official Record</span></div><p>{type}</p></header><div className="document-title"><span>{type.toUpperCase()}</span><h1>{employee?.name || "Select an employee"}</h1><p>{employee ? `${employee.empNo} · ${employee.designation} · ${employee.department}` : "No employee selected"}</p></div><div className="document-meta"><span>Document date<strong>{new Date().toLocaleDateString("en-GB")}</strong></span><span>Reference<strong>AF-{employee?.empNo || "UNASSIGNED"}-{type.replaceAll(" ", "-").toUpperCase()}</strong></span><span>Items covered<strong>{included.length}</strong></span></div><table><thead><tr><th>#</th><th>Asset / item</th><th>Asset code</th><th>Serial / location</th><th>Condition</th></tr></thead><tbody>{included.map((asset, index) => <tr key={asset.id}><td>{String(index + 1).padStart(2, "0")}</td><td><strong>{asset.name}</strong><small>{asset.details}</small></td><td>{asset.code}</td><td>{asset.serial || asset.location || "—"}</td><td><span className="document-condition">{asset.condition}</span></td></tr>)}</tbody></table><p className="document-statement">{returnDocument ? "The assets listed above have been returned to the company and verified by the responsible department. Any exception or damage must be recorded before final employee clearance is approved." : "I acknowledge receipt and responsibility for the company assets listed above. I agree to use them only for authorised company work, take reasonable care of them, and return them in good condition when requested."}</p><div className="signature-grid"><span>Employee signature<small>Name, signature & date</small></span><span>Issued / received by<small>IT Department</small></span><span>Authorised by<small>Department Head</small></span></div><footer><strong>AssetFlow verified document</strong><span>Generated from the live company asset register · {new Date().toLocaleString("en-GB")}</span></footer></article></div>;
 }
 
-function QrBatch({ assets, employeeMap }: { assets: Asset[]; employeeMap: Record<string, Employee> }) {
+function QrBatch({ assets, employeeMap, departments }: { assets: Asset[]; employeeMap: Record<string, Employee>; departments: string[] }) {
   const [category, setCategory] = useState("All");
-  const filtered = assets.filter((asset) => category === "All" || asset.category === category);
+  const [department, setDepartment] = useState("All");
+  const assetDepartment = (asset: Asset) => asset.employeeId
+    ? employeeMap[asset.employeeId]?.department || asset.custodianDepartment || "IT Dept"
+    : asset.location || asset.custodianDepartment || "IT Dept";
+  const departmentOptions: string[] = [];
+  [...departments, ...assets.map(assetDepartment)].forEach((value) => {
+    const item = value.trim();
+    if (item && !departmentOptions.some((option) => option.toLowerCase() === item.toLowerCase())) departmentOptions.push(item);
+  });
+  const filtered = assets.filter((asset) =>
+    (category === "All" || asset.category === category) &&
+    (department === "All" || assetDepartment(asset).toLowerCase() === department.toLowerCase()),
+  );
   const [selected, setSelected] = useState<string[]>(assets.map((asset) => asset.id));
   const visible = filtered.filter((asset) => selected.includes(asset.id));
+  const printDepartment = department === "All" ? "All departments" : department;
   return <div className="qr-batch">
     <div className="qr-batch-toolbar">
-      <label>Asset group<select value={category} onChange={(event) => setCategory(event.target.value)}><option>All</option><option>IT Asset</option><option>Non-IT Asset</option></select></label>
+      <div className="qr-batch-filters">
+        <label>Department<select value={department} onChange={(event) => setDepartment(event.target.value)}><option value="All">All departments</option>{departmentOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+        <label>Asset group<select value={category} onChange={(event) => setCategory(event.target.value)}><option>All</option><option>IT Asset</option><option>Non-IT Asset</option></select></label>
+      </div>
       <div><button className="button button-secondary" onClick={() => setSelected((rows) => filtered.every((asset) => rows.includes(asset.id)) ? rows.filter((id) => !filtered.some((asset) => asset.id === id)) : Array.from(new Set([...rows, ...filtered.map((asset) => asset.id)])))}><Check size={16} />Select / clear group</button><button className="button button-primary" disabled={!visible.length} onClick={() => window.print()}><Printer size={17} />Print {visible.length} labels</button></div>
     </div>
-    <div className="qr-batch-tip"><QrCode size={19} /><div><strong>Fast method for 100+ labels</strong><p>Filter a group, select all, then print on A4 adhesive label sheets. AssetFlow automatically arranges 24 labels per page; no one-by-one printing.</p></div></div>
-    <div className="qr-select-list">{filtered.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial || asset.location || "No serial"}</small></span><em>{asset.employeeId ? employeeMap[asset.employeeId]?.name : "In stock"}</em></label>)}</div>
-    <section className="qr-print-sheet">{Array.from({ length: Math.ceil(visible.length / 24) }, (_, pageIndex) => <div className="qr-print-page" key={pageIndex}>{visible.slice(pageIndex * 24, pageIndex * 24 + 24).map((asset) => <QrLabel key={asset.id} asset={asset} owner={asset.employeeId ? employeeMap[asset.employeeId]?.name : undefined} />)}</div>)}</section>
+    <div className="qr-batch-tip"><QrCode size={19} /><div><strong>Print all labels or prepare a department document</strong><p>Select a live department and optional asset group, then print on A4 adhesive label sheets with 24 labels per page. New departments added in AssetFlow automatically appear here.</p></div></div>
+    <div className="qr-batch-summary"><strong>{printDepartment}</strong><span>{filtered.length} matching assets · {visible.length} selected for printing</span></div>
+    <div className="qr-select-list">{filtered.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial || asset.location || "No serial"}</small></span><em>{asset.employeeId ? employeeMap[asset.employeeId]?.name : assetDepartment(asset)}</em></label>)}</div>
+    <section className="qr-print-sheet">{Array.from({ length: Math.ceil(visible.length / 24) }, (_, pageIndex) => <div className="qr-print-page" key={pageIndex}><header><div><strong>ASSETFLOW · QR LABEL REGISTER</strong><h1>{printDepartment}</h1></div><span>Page {pageIndex + 1} of {Math.ceil(visible.length / 24)}<small>{visible.length} labels</small></span></header><div className="qr-label-grid">{visible.slice(pageIndex * 24, pageIndex * 24 + 24).map((asset) => <QrLabel key={asset.id} asset={asset} owner={asset.employeeId ? `${employeeMap[asset.employeeId]?.name || "Assigned"} · ${assetDepartment(asset)}` : assetDepartment(asset)} />)}</div></div>)}</section>
   </div>;
 }
 

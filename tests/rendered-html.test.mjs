@@ -123,3 +123,19 @@ test("prevents realtime and double-submit duplicate assets in assignment", async
   assert.match(page, /id: assetId\.current/);
   assert.match(page, /new Map\(assets\.filter\(\(asset\) => asset\.status === "Available"\)\.map\(\(asset\) => \[asset\.id, asset\]\)\)/);
 });
+
+test("prints QR label documents by live department", async () => {
+  const [page, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /<QrBatch assets=\{assets\} employeeMap=\{employeeMap\} departments=\{departmentOptions\}/);
+  assert.match(page, /function QrBatch\(\{ assets, employeeMap, departments \}/);
+  assert.match(page, /<option value="All">All departments<\/option>\{departmentOptions\.map/);
+  assert.match(page, /\.\.\.departments, \.\.\.assets\.map\(assetDepartment\)/);
+  assert.match(page, /assetDepartment\(asset\)\.toLowerCase\(\) === department\.toLowerCase\(\)/);
+  assert.match(page, /QR LABEL REGISTER/);
+  assert.match(page, /<h1>\{printDepartment\}<\/h1>/);
+  assert.match(css, /\.qr-label-grid/);
+});

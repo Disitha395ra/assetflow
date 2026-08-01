@@ -353,9 +353,13 @@ select.status { appearance: none; cursor: pointer; padding-right: 8px; }
 .qr-batch-toolbar label { color: #69717f; font-size: 8px; }
 .qr-batch-toolbar select { display: block; min-width: 180px; height: 37px; margin-top: 6px; padding: 0 9px; font-size: 10px; }
 .qr-batch-toolbar > div { display: flex; gap: 8px; }
+.qr-batch-filters { align-items: end; flex-wrap: wrap; }
 .qr-batch-tip { display: flex; gap: 10px; align-items: start; background: #f3f0ff; border: 1px solid #e2dbff; color: #6044c9; border-radius: 9px; padding: 11px; margin: 14px 0; }
 .qr-batch-tip strong { display: block; font-size: 9px; }
 .qr-batch-tip p { color: #77708d; font-size: 7.5px; line-height: 1.5; margin: 3px 0 0; }
+.qr-batch-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 2px 8px; }
+.qr-batch-summary strong { color: #363044; font-size: 10px; }
+.qr-batch-summary span { color: #858b96; font-size: 8px; }
 .qr-select-list { max-height: 320px; overflow-y: auto; border: 1px solid #e3e5ea; border-radius: 10px; }
 .qr-select-list label { display: grid; grid-template-columns: 18px 1fr auto; gap: 9px; align-items: center; padding: 10px 11px; border-bottom: 1px solid #f0f1f4; cursor: pointer; }
 .qr-select-list input { accent-color: #6d4aff; }
@@ -514,8 +518,14 @@ select.status { appearance: none; cursor: pointer; padding-right: 8px; }
   .document-item-picker, .document-controls, .modal-head { display: none !important; }
   .qr-print-sheet, .qr-print-sheet * { visibility: visible !important; }
   .qr-print-sheet { display: block !important; position: absolute; inset: 0; width: 210mm; margin: 0; padding: 0; background: white; }
-  .qr-print-page { width: 210mm; height: 297mm; padding: 8mm; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(8, 32mm); gap: 2mm; overflow: hidden; break-after: page; page-break-after: always; }
+  .qr-print-page { width: 210mm; height: 297mm; padding: 8mm; overflow: hidden; break-after: page; page-break-after: always; }
   .qr-print-page:last-child { break-after: auto; page-break-after: auto; }
+  .qr-print-page > header { height: 8mm; margin-bottom: 2mm; display: flex; align-items: start; justify-content: space-between; border-bottom: .3mm solid #ddd8ef; color: #211d31; }
+  .qr-print-page > header strong { color: #6542e5; font-size: 5.5pt; letter-spacing: .4pt; }
+  .qr-print-page > header h1 { font-size: 9pt; line-height: 1; margin: 1mm 0 0; }
+  .qr-print-page > header > span { color: #666; font-size: 5.5pt; text-align: right; }
+  .qr-print-page > header small { display: block; margin-top: .7mm; }
+  .qr-label-grid { height: 270mm; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(8, 32mm); gap: 2mm; }
   .qr-label { width: 100%; height: 32mm; min-width: 0; min-height: 0; break-inside: avoid; page-break-inside: avoid; border: 1px dashed #b8bac1; display: grid; grid-template-columns: 20mm minmax(0, 1fr); grid-template-rows: 6mm 1fr; column-gap: 2mm; row-gap: 0; padding: 2mm; overflow: hidden; }
   .qr-label-brand { grid-column: 1 / -1; display: flex; align-items: center; gap: 1mm; color: #5d43c8; font-size: 6pt; }
   .qr-label img { width: 19mm; height: 19mm; align-self: center; }
