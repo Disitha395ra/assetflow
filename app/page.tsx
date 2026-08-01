@@ -141,48 +141,6 @@ function specLabel(key: string) {
   return key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase());
 }
 
-function assetSerialKey(asset: Asset) {
-  if (asset.category !== "IT Asset") return "";
-  const value = asset.serial.trim().toLowerCase();
-  if (["", "n/a", "na", "none", "unknown", "no serial", "not available", "-"].includes(value)) return "";
-  return value.replace(/[^a-z0-9]/g, "");
-}
-
-function canonicalizeAssets(rows: Asset[]) {
-  const canonical: Asset[] = [];
-  const seenIds = new Set<string>();
-  const serialIndexes = new Map<string, number>();
-  rows.forEach((asset) => {
-    if (seenIds.has(asset.id)) return;
-    seenIds.add(asset.id);
-    const serialKey = assetSerialKey(asset);
-    if (!serialKey) {
-      canonical.push(asset);
-      return;
-    }
-    const existingIndex = serialIndexes.get(serialKey);
-    if (existingIndex === undefined) {
-      serialIndexes.set(serialKey, canonical.length);
-      canonical.push(asset);
-      return;
-    }
-    const existing = canonical[existingIndex];
-    const assetScore = (asset.employeeId ? 4 : 0) + (asset.status === "Assigned" ? 2 : 0) + (asset.status !== "Retired" ? 1 : 0);
-    const existingScore = (existing.employeeId ? 4 : 0) + (existing.status === "Assigned" ? 2 : 0) + (existing.status !== "Retired" ? 1 : 0);
-    if (assetScore > existingScore || (assetScore === existingScore && asset.updatedAt > existing.updatedAt)) canonical[existingIndex] = asset;
-  });
-  return canonical;
-}
-
-function duplicateSerialAssetIds(rows: Asset[]) {
-  const groups = new Map<string, string[]>();
-  rows.forEach((asset) => {
-    const serialKey = assetSerialKey(asset);
-    if (serialKey) groups.set(serialKey, [...(groups.get(serialKey) ?? []), asset.id]);
-  });
-  return new Set(Array.from(groups.values()).filter((ids) => ids.length > 1).flat());
-}
-
 export default function Home() {
   const [view, setView] = useState<View>("Dashboard");
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -244,9 +202,6 @@ export default function Home() {
     () => Object.fromEntries(assets.map((item) => [item.id, item])),
     [assets],
   );
-  const workflowAssets = useMemo(() => canonicalizeAssets(assets), [assets]);
-  const duplicateAssetIds = useMemo(() => duplicateSerialAssetIds(assets), [assets]);
-  const excludedDuplicateCount = assets.length - workflowAssets.length;
   const departmentOptions = useMemo(() => {
     const options: string[] = [];
     [
@@ -264,7 +219,7 @@ export default function Home() {
   const filteredAssets = assets.filter((asset) => {
     const needle = search.toLowerCase();
     return (
-      (category === "All" || (category === "Available" ? asset.status === "Available" : category === "Duplicates" ? duplicateAssetIds.has(asset.id) : asset.category === category)) &&
+      (category === "All" || (category === "Available" ? asset.status === "Available" : asset.category === category)) &&
       [asset.code, asset.name, asset.serial, asset.location, asset.brand, asset.type]
         .join(" ")
         .toLowerCase()
@@ -327,7 +282,7 @@ export default function Home() {
   async function exportWorkbook() {
     const XLSX = await import("xlsx");
     const workbook = XLSX.utils.book_new();
-    const assetRows = workflowAssets.map((asset) => ({
+    const assetRows = assets.map((asset) => ({
       "Asset Code": asset.code,
       Category: asset.category,
       Type: asset.type,
@@ -350,7 +305,7 @@ export default function Home() {
       Designation: employee.designation,
       Email: employee.email,
       Status: employee.status,
-      "Assigned Items": workflowAssets.filter((asset) => asset.employeeId === employee.id).length,
+      "Assigned Items": assets.filter((asset) => asset.employeeId === employee.id).length,
     }));
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(assetRows), "Current Assets");
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(employeeRows), "Employees");
@@ -367,8 +322,8 @@ export default function Home() {
   }
 
   const pendingRequirements = requests.filter((request) => request.status === "Pending").length;
-  const healthyAssets = workflowAssets.filter((asset) => asset.status !== "In repair" && asset.status !== "Retired").length;
-  const inventoryHealth = workflowAssets.length ? Math.round((healthyAssets / workflowAssets.length) * 100) : 100;
+  const healthyAssets = assets.filter((asset) => asset.status !== "In repair" && asset.status !== "Retired").length;
+  const inventoryHealth = assets.length ? Math.round((healthyAssets / assets.length) * 100) : 100;
 
   if (firebaseReady && adminState !== "admin") {
     return <AdminGate state={adminState} email={signedInEmail} onSignIn={async () => {
@@ -407,7 +362,7 @@ export default function Home() {
         <div className="sidebar-foot">
           <div className="storage-row"><span>Inventory health</span><strong>{inventoryHealth}%</strong></div>
           <div className="progress"><span style={{ width: `${inventoryHealth}%` }} /></div>
-          <small>{workflowAssets.filter((a) => a.status !== "Retired").length} active assets tracked</small>
+          <small>{assets.filter((a) => a.status !== "Retired").length} active assets tracked</small>
         </div>
       </aside>
 
@@ -425,7 +380,7 @@ export default function Home() {
         <div className="content">
           {view === "Dashboard" && (
             <Dashboard
-              assets={workflowAssets}
+              assets={assets}
               requests={requests}
               movements={movements}
               employeeMap={employeeMap}
@@ -442,7 +397,6 @@ export default function Home() {
             <AssetsView
               assets={filteredAssets}
               allAssets={assets}
-              duplicateAssetIds={duplicateAssetIds}
               employeeMap={employeeMap}
               category={category}
               setCategory={setCategory}
@@ -457,7 +411,7 @@ export default function Home() {
           {view === "Employees" && (
             <EmployeesView
               employees={filteredEmployees}
-              assets={workflowAssets}
+              assets={assets}
               department={department}
               setDepartment={setDepartment}
               departments={departmentOptions}
@@ -473,7 +427,7 @@ export default function Home() {
             <RequirementsView requests={requests} setRequests={setRequests} windowConfig={requirementWindow} setWindowConfig={setRequirementWindow} onSchedule={() => setModal("schedule")} onAdd={() => setModal("request")} onExport={exportWorkbook} />
           )}
           {view === "Reports" && (
-            <ReportsView assets={workflowAssets} employees={employees} requests={requests} onExport={exportWorkbook} onDocument={openDocument} />
+            <ReportsView assets={assets} employees={employees} requests={requests} onExport={exportWorkbook} onDocument={openDocument} />
           )}
         </div>
       </section>
@@ -481,17 +435,17 @@ export default function Home() {
       {selectedAsset && <AssetDrawer asset={selectedAsset} employee={selectedAsset.employeeId ? employeeMap[selectedAsset.employeeId] : undefined} movements={movements.filter((row) => row.assetId === selectedAsset.id)} employeeMap={employeeMap} onEdit={() => { setEditingAsset(selectedAsset); setSelectedAsset(null); setModal("assetEdit"); }} onDelete={() => deleteAsset(selectedAsset)} onClose={() => setSelectedAsset(null)} />}
       {modal && (
         <Modal title={modalTitle(modal)} wide={modal === "document" || modal === "qrBatch"} onClose={() => setModal(null)}>
-          {modal === "asset" && <AssetForm departments={departmentOptions} existingAssets={assets} onSave={async (asset) => { await saveRecord("assets", asset); setAssets((rows) => [asset, ...rows.filter((row) => row.id !== asset.id)]); setModal(null); flash("Asset added to inventory"); }} />}
-          {modal === "assetEdit" && editingAsset && <AssetForm departments={departmentOptions} existingAssets={assets} initial={editingAsset} onSave={async (asset) => { await saveRecord("assets", asset); setAssets((rows) => rows.map((row) => row.id === asset.id ? asset : row)); setEditingAsset(null); setModal(null); setSelectedAsset(asset); flash("Asset details updated"); }} />}
+          {modal === "asset" && <AssetForm departments={departmentOptions} onSave={async (asset) => { await saveRecord("assets", asset); setAssets((rows) => [asset, ...rows.filter((row) => row.id !== asset.id)]); setModal(null); flash("Asset added to inventory"); }} />}
+          {modal === "assetEdit" && editingAsset && <AssetForm departments={departmentOptions} initial={editingAsset} onSave={async (asset) => { await saveRecord("assets", asset); setAssets((rows) => rows.map((row) => row.id === asset.id ? asset : row)); setEditingAsset(null); setModal(null); setSelectedAsset(asset); flash("Asset details updated"); }} />}
           {modal === "employee" && <EmployeeForm departments={departmentOptions} onSave={async (employee) => { await saveRecord("employees", employee); setEmployees((rows) => [employee, ...rows]); setDepartment(employee.department); setModal(null); flash("Employee added"); }} />}
           {modal === "employeeEdit" && editingEmployee && <EmployeeForm departments={departmentOptions} initial={editingEmployee} onSave={async (employee) => { await saveRecord("employees", employee); setEmployees((rows) => rows.map((row) => row.id === employee.id ? employee : row)); setDepartment(employee.department); setEditingEmployee(null); setModal(null); flash("Employee details updated"); }} />}
           {modal === "departments" && <DepartmentManager departments={departmentOptions} employees={employees} onSave={async (items) => { const nextWindow = { ...requirementWindow, departments: items }; await saveRequirementWindow(nextWindow); setDepartments(items); setRequirementWindow(nextWindow); setModal(null); flash("Department list updated"); }} />}
-          {modal === "assign" && <AssignForm assets={workflowAssets} employees={employees} onSave={async (assetIds, employeeId) => { const employee = employeeMap[employeeId]; for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Assigned", employeeId, location: asset.category === "Non-IT Asset" ? employee?.department : asset.location, custodianName: employee?.name, custodianDepartment: employee?.department, updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: "Assigned", date: today(), note: "Asset issued through AssetFlow" }); } openDocument("Asset Handover", employeeId, assetIds); flash(`${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned — handover document ready`); }} />}
-          {modal === "return" && <ReturnForm assets={workflowAssets} employees={employees} onSave={async (assetIds, employeeId, clearance) => { for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Available", employeeId: undefined, location: asset.category === "Non-IT Asset" ? "IT Dept" : asset.location, custodianName: undefined, custodianDepartment: undefined, condition: "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: clearance ? "Cleared" : "Returned", date: today(), note: clearance ? "Returned during employee clearance" : "Returned to IT stock" }); } openDocument(clearance ? "Employee Clearance" : "Asset Return", employeeId, assetIds); flash(clearance ? "Clearance report ready" : "Return document ready"); }} />}
-          {modal === "repair" && <RepairForm assets={workflowAssets} onSave={async (assetId, action, note) => { const asset = assets.find((row) => row.id === assetId); if (!asset) return; const nextStatus: AssetStatus = action === "start" ? "In repair" : asset.employeeId ? "Assigned" : "Available"; await updateAsset({ ...asset, status: nextStatus, condition: action === "start" ? "Repair" : "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId: asset.employeeId || "", type: "Repair", date: today(), note: `${action === "start" ? "Sent for repair" : "Repair completed"}: ${note}` }); setModal(null); flash(action === "start" ? "Repair record started" : "Repair completion recorded"); }} />}
+          {modal === "assign" && <AssignForm assets={assets} employees={employees} onSave={async (assetIds, employeeId) => { const employee = employeeMap[employeeId]; for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Assigned", employeeId, location: asset.category === "Non-IT Asset" ? employee?.department : asset.location, custodianName: employee?.name, custodianDepartment: employee?.department, updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: "Assigned", date: today(), note: "Asset issued through AssetFlow" }); } openDocument("Asset Handover", employeeId, assetIds); flash(`${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned — handover document ready`); }} />}
+          {modal === "return" && <ReturnForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, clearance) => { for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Available", employeeId: undefined, location: asset.category === "Non-IT Asset" ? "IT Dept" : asset.location, custodianName: undefined, custodianDepartment: undefined, condition: "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: clearance ? "Cleared" : "Returned", date: today(), note: clearance ? "Returned during employee clearance" : "Returned to IT stock" }); } openDocument(clearance ? "Employee Clearance" : "Asset Return", employeeId, assetIds); flash(clearance ? "Clearance report ready" : "Return document ready"); }} />}
+          {modal === "repair" && <RepairForm assets={assets} onSave={async (assetId, action, note) => { const asset = assets.find((row) => row.id === assetId); if (!asset) return; const nextStatus: AssetStatus = action === "start" ? "In repair" : asset.employeeId ? "Assigned" : "Available"; await updateAsset({ ...asset, status: nextStatus, condition: action === "start" ? "Repair" : "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId: asset.employeeId || "", type: "Repair", date: today(), note: `${action === "start" ? "Sent for repair" : "Repair completed"}: ${note}` }); setModal(null); flash(action === "start" ? "Repair record started" : "Repair completion recorded"); }} />}
           {modal === "request" && <RequestForm departments={departmentOptions} onSave={async (request) => { await saveRecord("requirements", request); setRequests((rows) => [request, ...rows]); setModal(null); flash("Requirement submitted"); }} />}
-          {modal === "document" && <PrintableDocument type={documentType} employees={employees} assets={workflowAssets} initialEmployeeId={documentEmployeeId} initialAssetIds={documentAssetIds} />}
-          {modal === "qrBatch" && <QrBatch assets={workflowAssets} employeeMap={employeeMap} departments={departmentOptions} duplicateCount={excludedDuplicateCount} />}
+          {modal === "document" && <PrintableDocument type={documentType} employees={employees} assets={assets} initialEmployeeId={documentEmployeeId} initialAssetIds={documentAssetIds} />}
+          {modal === "qrBatch" && <QrBatch assets={assets} employeeMap={employeeMap} departments={departmentOptions} />}
           {modal === "schedule" && <ScheduleForm value={requirementWindow} onSave={async (next) => { setRequirementWindow(next); await saveRequirementWindow(next); setModal(null); flash(next.isOpen ? "Requirement form opened" : "Requirement form closed"); }} />}
         </Modal>
       )}
@@ -558,13 +512,12 @@ function Dashboard({ assets, requests, movements, employeeMap, assetMap, onView,
   );
 }
 
-function AssetsView({ assets, allAssets, duplicateAssetIds, employeeMap, category, setCategory, onAdd, onAsset, onEdit, onDelete, onExport, onQrBatch }: { assets: Asset[]; allAssets: Asset[]; duplicateAssetIds: Set<string>; employeeMap: Record<string, Employee>; category: string; setCategory: (value: string) => void; onAdd: () => void; onAsset: (asset: Asset) => void; onEdit: (asset: Asset) => void; onDelete: (asset: Asset) => void | Promise<void>; onExport: () => void; onQrBatch: () => void }) {
+function AssetsView({ assets, allAssets, employeeMap, category, setCategory, onAdd, onAsset, onEdit, onDelete, onExport, onQrBatch }: { assets: Asset[]; allAssets: Asset[]; employeeMap: Record<string, Employee>; category: string; setCategory: (value: string) => void; onAdd: () => void; onAsset: (asset: Asset) => void; onEdit: (asset: Asset) => void; onDelete: (asset: Asset) => void | Promise<void>; onExport: () => void; onQrBatch: () => void }) {
   const filters = [
     { value: "All", label: "All items", count: allAssets.length },
     { value: "Available", label: "Available items", count: allAssets.filter((asset) => asset.status === "Available").length },
     { value: "IT Asset", label: "IT items", count: allAssets.filter((asset) => asset.category === "IT Asset").length },
     { value: "Non-IT Asset", label: "Non-IT items", count: allAssets.filter((asset) => asset.category === "Non-IT Asset").length },
-    { value: "Duplicates", label: "Duplicate serials", count: duplicateAssetIds.size },
   ];
   return (
     <>
@@ -578,8 +531,7 @@ function AssetsView({ assets, allAssets, duplicateAssetIds, employeeMap, categor
       </div>
       <section className="panel table-panel">
         <div className="table-toolbar"><div><strong>Asset register</strong><small>{assets.length} matching records</small></div><div className="legend"><span><i className="dot green" />Available</span><span><i className="dot blue" />Assigned</span><span><i className="dot orange" />Repair</span></div></div>
-        {duplicateAssetIds.size > 0 && <div className="duplicate-alert"><ShieldCheck size={17} /><div><strong>{duplicateAssetIds.size} IT records share a serial number</strong><span>Operational views and QR printing use one canonical record. Open “Duplicate serials” to compare asset IDs, then delete only the incorrect record.</span></div></div>}
-        <AssetTable assets={assets} duplicateAssetIds={duplicateAssetIds} employeeMap={employeeMap} onAsset={onAsset} onEdit={onEdit} onDelete={onDelete} />
+        <AssetTable assets={assets} employeeMap={employeeMap} onAsset={onAsset} onEdit={onEdit} onDelete={onDelete} />
       </section>
     </>
   );
@@ -654,9 +606,9 @@ function ReportsView({ assets, employees, requests, onExport, onDocument }: { as
   );
 }
 
-function AssetTable({ assets, employeeMap, duplicateAssetIds = new Set<string>(), onAsset, onEdit, onDelete, compact = false }: { assets: Asset[]; employeeMap: Record<string, Employee>; duplicateAssetIds?: Set<string>; onAsset: (asset: Asset) => void; onEdit?: (asset: Asset) => void; onDelete?: (asset: Asset) => void | Promise<void>; compact?: boolean }) {
+function AssetTable({ assets, employeeMap, onAsset, onEdit, onDelete, compact = false }: { assets: Asset[]; employeeMap: Record<string, Employee>; onAsset: (asset: Asset) => void; onEdit?: (asset: Asset) => void; onDelete?: (asset: Asset) => void | Promise<void>; compact?: boolean }) {
   const showActions = Boolean(onEdit && onDelete);
-  return <div className="responsive-table"><table><thead><tr><th>Asset</th><th>Category</th>{!compact && <th>Serial / location</th>}<th>Assigned to</th><th>Status</th><th>{showActions ? "Actions" : ""}</th></tr></thead><tbody>{assets.map((asset) => <tr key={asset.id} onClick={() => onAsset(asset)}><td><div className="asset-cell"><span>{asset.type === "Mobile Phone" ? <Smartphone size={18} /> : <Monitor size={18} />}</span><div><strong>{asset.name}</strong><small>{asset.code}</small>{duplicateAssetIds.has(asset.id) && <em className="duplicate-record">Duplicate serial · ID {asset.id.slice(0, 8)}</em>}</div></div></td><td><span className="category-label">{asset.category}</span></td>{!compact && <td><code>{asset.serial || asset.location || "—"}</code></td>}<td>{asset.employeeId ? <div className="mini-person"><span>{initials(employeeMap[asset.employeeId]?.name || "")}</span><div><strong>{employeeMap[asset.employeeId]?.name}</strong><small>{employeeMap[asset.employeeId]?.department}</small></div></div> : <span className="muted">{asset.category === "Non-IT Asset" ? asset.location || "—" : "—"}</span>}</td><td><span className={statusClass(asset.status)}>{asset.status}</span></td><td>{showActions ? <div className="asset-row-actions"><button aria-label={`Edit ${asset.name}`} title="Edit asset" onClick={(event) => { event.stopPropagation(); onEdit?.(asset); }}><Pencil size={15} />Edit</button><button className="delete" aria-label={`Delete ${asset.name}`} title={asset.employeeId ? "Delete assigned asset" : "Delete asset"} onClick={(event) => { event.stopPropagation(); void onDelete?.(asset); }}><Trash2 size={15} />Delete</button></div> : <button className="row-action" aria-label={`View ${asset.name}`}>→</button>}</td></tr>)}</tbody></table></div>;
+  return <div className="responsive-table"><table><thead><tr><th>Asset</th><th>Category</th>{!compact && <th>Serial / location</th>}<th>Assigned to</th><th>Status</th><th>{showActions ? "Actions" : ""}</th></tr></thead><tbody>{assets.map((asset) => <tr key={asset.id} onClick={() => onAsset(asset)}><td><div className="asset-cell"><span>{asset.type === "Mobile Phone" ? <Smartphone size={18} /> : <Monitor size={18} />}</span><div><strong>{asset.name}</strong><small>{asset.code}</small></div></div></td><td><span className="category-label">{asset.category}</span></td>{!compact && <td><code>{asset.serial || asset.location || "—"}</code></td>}<td>{asset.employeeId ? <div className="mini-person"><span>{initials(employeeMap[asset.employeeId]?.name || "")}</span><div><strong>{employeeMap[asset.employeeId]?.name}</strong><small>{employeeMap[asset.employeeId]?.department}</small></div></div> : <span className="muted">{asset.category === "Non-IT Asset" ? asset.location || "—" : "—"}</span>}</td><td><span className={statusClass(asset.status)}>{asset.status}</span></td><td>{showActions ? <div className="asset-row-actions"><button aria-label={`Edit ${asset.name}`} title="Edit asset" onClick={(event) => { event.stopPropagation(); onEdit?.(asset); }}><Pencil size={15} />Edit</button><button className="delete" aria-label={`Delete ${asset.name}`} title={asset.employeeId ? "Delete assigned asset" : "Delete asset"} onClick={(event) => { event.stopPropagation(); void onDelete?.(asset); }}><Trash2 size={15} />Delete</button></div> : <button className="row-action" aria-label={`View ${asset.name}`}>→</button>}</td></tr>)}</tbody></table></div>;
 }
 
 function AssetDrawer({ asset, employee, movements, employeeMap, onEdit, onDelete, onClose }: { asset: Asset; employee?: Employee; movements: Movement[]; employeeMap: Record<string, Employee>; onEdit: () => void; onDelete: () => void | Promise<void>; onClose: () => void }) {
@@ -670,11 +622,10 @@ function Modal({ title, children, onClose, wide = false }: { title: string; chil
   return <div className="modal-backdrop"><section className={wide ? "modal modal-wide" : "modal"}><div className="modal-head"><div><span>ASSETFLOW</span><h2>{title}</h2></div><button className="icon-button" onClick={onClose}><X size={20} /></button></div><div className="modal-body">{children}</div></section></div>;
 }
 
-function AssetForm({ departments, existingAssets, onSave, initial }: { departments: string[]; existingAssets: Asset[]; onSave: (asset: Asset) => void | Promise<void>; initial?: Asset }) {
+function AssetForm({ departments, onSave, initial }: { departments: string[]; onSave: (asset: Asset) => void | Promise<void>; initial?: Asset }) {
   const [form, setForm] = useState({ category: initial?.category ?? "IT Asset", type: initial?.type ?? "Laptop", name: initial?.name ?? "", brand: initial?.brand ?? "", model: initial?.model ?? "", serial: initial?.serial ?? "", location: initial?.location ?? initial?.custodianDepartment ?? departments[0] ?? "", condition: initial?.condition ?? "Excellent", details: initial?.details ?? "" });
   const [specs, setSpecs] = useState<Record<string, string>>(initial?.specs ?? {});
   const [saving, setSaving] = useState(false);
-  const [validationError, setValidationError] = useState("");
   const assetId = useRef(initial?.id ?? crypto.randomUUID());
   const submitting = useRef(false);
   const field = (key: keyof typeof form) => ({ value: form[key], onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm({ ...form, [key]: event.target.value }) });
@@ -689,7 +640,7 @@ function AssetForm({ departments, existingAssets, onSave, initial }: { departmen
   const nonItModels = isNonIt && form.type !== "Other"
     ? NON_IT_ITEM_MODELS[form.type as keyof typeof NON_IT_ITEM_MODELS]
     : null;
-  return <form className="form-grid" onSubmit={async (event) => { event.preventDefault(); if (submitting.current) return; const serialKey = isNonIt ? "" : form.serial.trim().toLowerCase().replace(/[^a-z0-9]/g, ""); const originalSerialKey = initial ? assetSerialKey(initial) : ""; const duplicate = serialKey && serialKey !== originalSerialKey ? existingAssets.find((asset) => asset.id !== assetId.current && assetSerialKey(asset) === serialKey) : undefined; if (duplicate) { setValidationError(`Serial number ${form.serial.trim()} already belongs to ${duplicate.code} (${duplicate.name}). Open that record instead of creating another asset ID.`); return; } setValidationError(""); submitting.current = true; setSaving(true); const prefix = form.category === "IT Asset" ? "IT" : "NIT"; try { await onSave({ ...initial, id: assetId.current, code: initial?.code ?? `${prefix}-${form.type.slice(0, 3).toUpperCase()}-${String(Date.now()).slice(-4)}`, ...form, serial: isNonIt ? "" : form.serial.trim(), location: isNonIt ? form.location : undefined, specs, category: form.category as Asset["category"], status: initial?.status ?? "Available", updatedAt: today() }); } finally { submitting.current = false; setSaving(false); } }}>
+  return <form className="form-grid" onSubmit={async (event) => { event.preventDefault(); if (submitting.current) return; submitting.current = true; setSaving(true); const prefix = form.category === "IT Asset" ? "IT" : "NIT"; try { await onSave({ ...initial, id: assetId.current, code: initial?.code ?? `${prefix}-${form.type.slice(0, 3).toUpperCase()}-${String(Date.now()).slice(-4)}`, ...form, serial: isNonIt ? "" : form.serial.trim(), location: isNonIt ? form.location : undefined, specs, category: form.category as Asset["category"], status: initial?.status ?? "Available", updatedAt: today() }); } finally { submitting.current = false; setSaving(false); } }}>
     <label>Asset category<select value={form.category} onChange={(event) => { const nextCategory = event.target.value as keyof typeof ASSET_TYPES; setForm({ ...form, category: nextCategory, type: ASSET_TYPES[nextCategory][0], model: "", serial: nextCategory === "Non-IT Asset" ? "" : form.serial }); setSpecs({}); }}><option>IT Asset</option><option>Non-IT Asset</option></select></label>
     <label>Item type<select value={form.type} onChange={(event) => { setForm({ ...form, type: event.target.value, model: "" }); setSpecs({}); }}>{typeOptions.map((type) => <option key={type}>{type}</option>)}</select></label>
     <label className="full">Display name<input required placeholder="e.g. Lenovo ThinkPad E14" {...field("name")} /></label>
@@ -706,7 +657,6 @@ function AssetForm({ departments, existingAssets, onSave, initial }: { departmen
     {dynamicFields.map((spec) => <label key={spec.key}>{spec.label}{spec.options ? <select required value={specs[spec.key] ?? ""} onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })}><option value="">Select {spec.label.toLowerCase()}</option>{spec.options.map((option) => <option key={option}>{option}</option>)}</select> : <input required value={specs[spec.key] ?? ""} placeholder={spec.placeholder} onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })} />}</label>)}
     <label>Condition<select {...field("condition")}><option>Excellent</option><option>Good</option><option>Fair</option><option>Repair</option></select></label>
     <label className="full">Additional notes<textarea placeholder="Warranty, accessories or any other information…" {...field("details")} /></label>
-    {validationError && <div className="form-error full"><strong>Duplicate asset blocked</strong><span>{validationError}</span></div>}
     <FormActions text={saving ? "Saving asset…" : initial ? "Update asset" : "Add asset"} disabled={saving} />
   </form>;
 }
@@ -794,7 +744,7 @@ const QR_LABEL_FORMATS = {
 } as const;
 type QrLabelFormat = keyof typeof QR_LABEL_FORMATS;
 
-function QrBatch({ assets, employeeMap, departments, duplicateCount }: { assets: Asset[]; employeeMap: Record<string, Employee>; departments: string[]; duplicateCount: number }) {
+function QrBatch({ assets, employeeMap, departments }: { assets: Asset[]; employeeMap: Record<string, Employee>; departments: string[] }) {
   const [category, setCategory] = useState("All");
   const [department, setDepartment] = useState("All");
   const [labelFormat, setLabelFormat] = useState<QrLabelFormat>("standard");
@@ -841,7 +791,6 @@ function QrBatch({ assets, employeeMap, departments, duplicateCount }: { assets:
       <div><button className="button button-secondary" onClick={() => setSelected((rows) => preferredFiltered.every((asset) => rows.includes(asset.id)) ? rows.filter((id) => !filtered.some((asset) => asset.id === id)) : Array.from(new Set([...rows, ...preferredFiltered.map((asset) => asset.id)])))}><Check size={16} />Select / clear unique</button><button className="button button-primary" disabled={!visible.length} onClick={() => window.print()}><Printer size={17} />Print {visible.length} labels</button></div>
     </div>
     <div className="qr-batch-tip"><QrCode size={19} /><div><strong>{format.label} labels · {format.perPage} per A4 page</strong><p>{format.guidance} Keep the printed QR flat, clean and unobstructed for reliable scanning.</p></div></div>
-    {duplicateCount > 0 && <div className="qr-duplicate-note"><ShieldCheck size={16} /><span><strong>{duplicateCount} duplicate-serial records excluded</strong>QR sheets use one canonical asset ID per IT serial number. Review the Duplicate serials filter in Assets to remove incorrect legacy records.</span></div>}
     {possibleDuplicateNames > 0 && <div className="qr-name-duplicate-note"><ShieldCheck size={16} /><span><strong>{possibleDuplicateNames} same-name assignments left unselected</strong>Records with the same employee, name, type, brand and model but different codes are treated as possible duplicates. Select an unchecked code manually only when it is a separate physical asset.</span></div>}
     <div className="qr-batch-summary"><strong>{printDepartment}</strong><span>{filtered.length} matching assets · {visible.length} selected · {format.label} format</span></div>
     <div className="qr-select-list">{filtered.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial || asset.location || "No serial"}</small></span><em className={preferredQrIds.has(asset.id) ? "" : "possible-duplicate"}>{preferredQrIds.has(asset.id) ? asset.employeeId ? employeeMap[asset.employeeId]?.name : assetDepartment(asset) : "Possible duplicate · verify code"}</em></label>)}</div>

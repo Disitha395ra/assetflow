@@ -79,14 +79,14 @@ test("supports editing and deleting assigned or unassigned assets safely", async
 
   assert.match(page, /assetEdit: "Edit asset details"/);
   assert.match(page, />Edit asset<\/button>/);
-  assert.match(page, /<AssetForm departments=\{departmentOptions\} existingAssets=\{assets\} initial=\{editingAsset\}/);
+  assert.match(page, /<AssetForm departments=\{departmentOptions\} initial=\{editingAsset\}/);
   assert.match(page, /id: initial\?\.id \?\? crypto\.randomUUID\(\)/);
   assert.match(page, /code: initial\?\.code \?\?/);
   assert.match(page, /status: initial\?\.status \?\? "Available"/);
   assert.match(page, /deletion will remove that assignment without recording a return/);
   assert.match(page, /deleteAssetRecord\(asset\.id, movementIds\)/);
   assert.match(page, /onEdit=\{\(asset\) => \{ setEditingAsset\(asset\); setModal\("assetEdit"\); \}\}/);
-  assert.match(page, /<AssetTable assets=\{assets\} duplicateAssetIds=\{duplicateAssetIds\} employeeMap=\{employeeMap\} onAsset=\{onAsset\} onEdit=\{onEdit\} onDelete=\{onDelete\}/);
+  assert.match(page, /<AssetTable assets=\{assets\} employeeMap=\{employeeMap\} onAsset=\{onAsset\} onEdit=\{onEdit\} onDelete=\{onDelete\}/);
   assert.match(page, /aria-label=\{`Edit \$\{asset\.name\}`\}/);
   assert.match(page, /aria-label=\{`Delete \$\{asset\.name\}`\}/);
   assert.match(page, /event\.stopPropagation\(\); onEdit\?\.\(asset\)/);
@@ -120,7 +120,7 @@ test("prevents realtime and double-submit duplicate assets in assignment", async
   assert.match(page, /const assetId = useRef\(initial\?\.id \?\? crypto\.randomUUID\(\)\)/);
   assert.match(page, /const submitting = useRef\(false\)/);
   assert.match(page, /if \(submitting\.current\) return;/);
-  assert.match(page, /setValidationError\(""\); submitting\.current = true/);
+  assert.match(page, /if \(submitting\.current\) return; submitting\.current = true/);
   assert.match(page, /id: assetId\.current/);
   assert.match(page, /new Map\(assets\.filter\(\(asset\) => asset\.status === "Available"\)\.map\(\(asset\) => \[asset\.id, asset\]\)\)/);
 });
@@ -131,8 +131,8 @@ test("prints QR label documents by live department", async () => {
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /<QrBatch assets=\{workflowAssets\} employeeMap=\{employeeMap\} departments=\{departmentOptions\} duplicateCount=\{excludedDuplicateCount\}/);
-  assert.match(page, /function QrBatch\(\{ assets, employeeMap, departments, duplicateCount \}/);
+  assert.match(page, /<QrBatch assets=\{assets\} employeeMap=\{employeeMap\} departments=\{departmentOptions\}/);
+  assert.match(page, /function QrBatch\(\{ assets, employeeMap, departments \}/);
   assert.match(page, /<option value="All">All departments<\/option>\{departmentOptions\.map/);
   assert.match(page, /\.\.\.departments, \.\.\.assets\.map\(assetDepartment\)/);
   assert.match(page, /assetDepartment\(asset\)\.toLowerCase\(\) === department\.toLowerCase\(\)/);
@@ -164,26 +164,13 @@ test("offers practical QR sizes for large, small and cable assets", async () => 
   assert.match(css, /\.qr-cable-label > i/);
 });
 
-test("canonicalizes legacy duplicate IT serials across operational workflows", async () => {
-  const [page, css] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
-  ]);
+test("allows repeated serial values while keeping asset records distinct", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 
-  assert.match(page, /function assetSerialKey\(asset: Asset\)/);
-  assert.match(page, /\["", "n\/a", "na", "none", "unknown", "no serial", "not available", "-"\]\.includes\(value\)/);
-  assert.match(page, /function canonicalizeAssets\(rows: Asset\[\]\)/);
-  assert.match(page, /const workflowAssets = useMemo\(\(\) => canonicalizeAssets\(assets\), \[assets\]\)/);
-  assert.match(page, /assetScore > existingScore/);
-  assert.match(page, /category === "Duplicates" \? duplicateAssetIds\.has\(asset\.id\)/);
-  assert.match(page, /const originalSerialKey = initial \? assetSerialKey\(initial\) : ""/);
-  assert.match(page, /serialKey && serialKey !== originalSerialKey \? existingAssets\.find\(\(asset\) => asset\.id !== assetId\.current && assetSerialKey\(asset\) === serialKey\)/);
-  assert.match(page, /Duplicate asset blocked/);
-  assert.match(page, /<AssignForm assets=\{workflowAssets\}/);
-  assert.match(page, /<QrBatch assets=\{workflowAssets\}/);
-  assert.match(page, /duplicate-serial records excluded/);
-  assert.match(css, /\.duplicate-record/);
-  assert.match(css, /\.duplicate-alert/);
+  assert.doesNotMatch(page, /assetSerialKey|canonicalizeAssets|duplicateSerialAssetIds/);
+  assert.doesNotMatch(page, /Duplicate asset blocked|duplicate-serial records excluded/);
+  assert.match(page, /<AssignForm assets=\{assets\}/);
+  assert.match(page, /<QrBatch assets=\{assets\} employeeMap=\{employeeMap\} departments=\{departmentOptions\}/);
 });
 
 test("does not preselect same-name QR records assigned to one employee", async () => {
