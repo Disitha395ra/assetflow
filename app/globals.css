@@ -140,6 +140,16 @@ code { color: #545b69; font: 8.5px Consolas, monospace; background: #f5f6f8; pad
 .asset-row-actions button:hover { background: #f6f3ff; }
 .asset-row-actions button.delete { color: #b42318; border-color: #f4c7c3; }
 .asset-row-actions button.delete:hover { background: #fff5f4; }
+.duplicate-record { display: block; color: #b54708; font-size: 7px; font-style: normal; font-weight: 800; margin-top: 4px; }
+.duplicate-alert, .qr-duplicate-note { display: flex; align-items: flex-start; gap: 9px; color: #934f08; background: #fff8eb; border: 1px solid #f5d59b; border-radius: 9px; padding: 10px 12px; margin: 10px 12px; }
+.duplicate-alert svg, .qr-duplicate-note svg { flex: 0 0 auto; margin-top: 1px; }
+.duplicate-alert strong, .duplicate-alert span, .qr-duplicate-note strong { display: block; }
+.duplicate-alert strong, .qr-duplicate-note strong { font-size: 9px; }
+.duplicate-alert span, .qr-duplicate-note { font-size: 7.5px; line-height: 1.5; }
+.form-error { color: #9d251c; background: #fff3f2; border: 1px solid #f3c7c3; border-radius: 9px; padding: 10px 11px; }
+.form-error strong, .form-error span { display: block; }
+.form-error strong { font-size: 9px; }
+.form-error span { font-size: 7.5px; line-height: 1.5; margin-top: 3px; }
 .request-list { padding: 4px 18px 8px; }
 .request-list > div { display: grid; grid-template-columns: 34px 1fr auto; gap: 10px; align-items: center; padding: 12px 0; border-bottom: 1px solid #f1f2f4; }
 .request-list > div:last-child { border: 0; }
@@ -360,6 +370,8 @@ select.status { appearance: none; cursor: pointer; padding-right: 8px; }
 .qr-batch-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 2px 8px; }
 .qr-batch-summary strong { color: #363044; font-size: 10px; }
 .qr-batch-summary span { color: #858b96; font-size: 8px; }
+.qr-duplicate-note { margin: -5px 0 12px; }
+.qr-duplicate-note span { display: block; }
 .qr-select-list { max-height: 320px; overflow-y: auto; border: 1px solid #e3e5ea; border-radius: 10px; }
 .qr-select-list label { display: grid; grid-template-columns: 18px 1fr auto; gap: 9px; align-items: center; padding: 10px 11px; border-bottom: 1px solid #f0f1f4; cursor: pointer; }
 .qr-select-list input { accent-color: #6d4aff; }
