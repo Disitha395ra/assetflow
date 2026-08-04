@@ -316,6 +316,41 @@ export default function Home() {
     flash("Excel report downloaded");
   }
 
+  async function exportEmployeeLaptopWorkbook() {
+    const XLSX = await import("xlsx");
+    const laptopRows = assets
+      .filter((asset) => asset.employeeId && asset.category === "IT Asset" && asset.type.trim().toLowerCase() === "laptop")
+      .map((asset) => {
+        const employee = employeeMap[asset.employeeId!];
+        return {
+          "Employee No": employee?.empNo ?? "",
+          Employee: employee?.name ?? asset.custodianName ?? "",
+          Email: employee?.email ?? "",
+          Department: employee?.department ?? asset.custodianDepartment ?? "",
+          Designation: employee?.designation ?? "",
+          "Asset Code": asset.code,
+          Laptop: asset.name,
+          Brand: asset.brand,
+          Model: asset.model,
+          "Serial Number": asset.serial,
+          Condition: asset.condition,
+          Status: asset.status,
+          Specifications: Object.entries(asset.specs ?? {}).map(([key, value]) => `${specLabel(key)}: ${value}`).join("; "),
+          Details: asset.details,
+        };
+      });
+    if (!laptopRows.length) {
+      flash("No employee laptop records to export");
+      return;
+    }
+    const worksheet = XLSX.utils.json_to_sheet(laptopRows);
+    worksheet["!cols"] = [12, 24, 28, 22, 22, 15, 26, 16, 18, 20, 12, 12, 38, 34].map((wch) => ({ wch }));
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Employee Laptops");
+    XLSX.writeFile(workbook, `AssetFlow-employee-laptops-${today()}.xlsx`);
+    flash(`${laptopRows.length} employee laptop record${laptopRows.length === 1 ? "" : "s"} downloaded`);
+  }
+
   function openDocument(type: string, employeeId = "", assetIds: string[] = []) {
     setDocumentType(type);
     setDocumentEmployeeId(employeeId);
@@ -429,7 +464,7 @@ export default function Home() {
             <RequirementsView requests={requests} setRequests={setRequests} windowConfig={requirementWindow} setWindowConfig={setRequirementWindow} onSchedule={() => setModal("schedule")} onAdd={() => setModal("request")} onExport={exportWorkbook} />
           )}
           {view === "Reports" && (
-            <ReportsView assets={assets} employees={employees} requests={requests} onExport={exportWorkbook} onDocument={openDocument} />
+            <ReportsView assets={assets} employees={employees} requests={requests} onExport={exportWorkbook} onExportEmployeeLaptops={exportEmployeeLaptopWorkbook} onDocument={openDocument} />
           )}
         </div>
       </section>
@@ -591,9 +626,11 @@ function RequirementsView({ requests, setRequests, windowConfig, setWindowConfig
   );
 }
 
-function ReportsView({ assets, employees, requests, onExport, onDocument }: { assets: Asset[]; employees: Employee[]; requests: RequestRow[]; onExport: () => void; onDocument: (type: string) => void }) {
+function ReportsView({ assets, employees, requests, onExport, onExportEmployeeLaptops, onDocument }: { assets: Asset[]; employees: Employee[]; requests: RequestRow[]; onExport: () => void; onExportEmployeeLaptops: () => void; onDocument: (type: string) => void }) {
+  const assignedLaptopCount = assets.filter((asset) => asset.employeeId && asset.category === "IT Asset" && asset.type.trim().toLowerCase() === "laptop").length;
   const cards = [
     { icon: FileSpreadsheet, title: "Current asset register", copy: `${assets.length} assets with current owners, departments and condition`, action: "Export Excel", click: onExport, tone: "green" },
+    { icon: Monitor, title: "Employee laptop register", copy: `${assignedLaptopCount} assigned laptop${assignedLaptopCount === 1 ? "" : "s"} with employee, department, asset and specification details`, action: "Export laptop Excel", click: onExportEmployeeLaptops, tone: "violet" },
     { icon: Users, title: "Employee asset summary", copy: `${employees.length} employees with every item currently assigned`, action: "Generate PDF", click: () => onDocument("Employee Asset Summary"), tone: "blue" },
     { icon: ArrowLeftRight, title: "Handover document", copy: "Formal issue sheet with item details and signature spaces", action: "Create document", click: () => onDocument("Asset Handover"), tone: "violet" },
     { icon: ClipboardCheck, title: "Clearance report", copy: "Selected returned items and final employee clearance statement", action: "Create clearance", click: () => onDocument("Employee Clearance"), tone: "orange" },

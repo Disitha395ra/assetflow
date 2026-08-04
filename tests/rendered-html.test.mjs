@@ -178,6 +178,19 @@ test("allows repeated serial values while keeping asset records distinct", async
   assert.match(page, /<QrBatch assets=\{assets\} employeeMap=\{employeeMap\} departments=\{departmentOptions\}/);
 });
 
+test("exports a focused employee laptop register from live assignments", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /function exportEmployeeLaptopWorkbook\(\)/);
+  assert.match(page, /asset\.employeeId && asset\.category === "IT Asset" && asset\.type\.trim\(\)\.toLowerCase\(\) === "laptop"/);
+  assert.match(page, /"Employee No": employee\?\.empNo/);
+  assert.match(page, /"Asset Code": asset\.code/);
+  assert.match(page, /XLSX\.utils\.book_append_sheet\(workbook, worksheet, "Employee Laptops"\)/);
+  assert.match(page, /AssetFlow-employee-laptops-\$\{today\(\)\}\.xlsx/);
+  assert.match(page, /title: "Employee laptop register"/);
+  assert.match(page, /onExportEmployeeLaptops=\{exportEmployeeLaptopWorkbook\}/);
+});
+
 test("does not preselect same-name QR records assigned to one employee", async () => {
   const [page, css] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
