@@ -181,6 +181,8 @@ select:focus, input:focus, textarea:focus { border-color: #8c73ee; box-shadow: 0
 .employee-foot strong { font-size: 9px; }
 .employee-foot > div { display: flex; align-items: center; gap: 8px; }
 .employee-foot button { border: 0; background: transparent; color: #6947df; font-size: 8.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 3px; }
+.employee-foot button.delete { color: #b42318; }
+.employee-foot button.delete:hover { color: #8f1d14; }
 
 .audit-badge { color: #546072; background: #f5f6f8; padding: 6px 8px; border-radius: 7px; font-size: 8px; display: inline-flex; align-items: center; gap: 5px; }
 .timeline { padding: 5px 24px 25px; }

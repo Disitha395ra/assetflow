@@ -58,6 +58,22 @@ test("supports custom departments, employee editing and type-specific asset fiel
   assert.match(rules, /match \/settings\/departments/);
 });
 
+test("deletes duplicate employee records only after assignments are cleared", async () => {
+  const [page, firebase] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /async function deleteEmployee\(employee: Employee\)/);
+  assert.match(page, /assets\.filter\(\(asset\) => asset\.employeeId === employee\.id\)/);
+  assert.match(page, /return or reassign \$\{assignedAssets\.length\} asset/);
+  assert.match(page, /await removeRecord\("employees", employee\.id\)/);
+  assert.match(page, /setEmployees\(\(rows\) => rows\.filter\(\(row\) => row\.id !== employee\.id\)\)/);
+  assert.match(page, /aria-label=\{`Delete \$\{employee\.name\}`\}/);
+  assert.match(page, /Historical asset movements will be kept/);
+  assert.match(firebase, /export async function removeRecord/);
+});
+
 test("keeps department choices synchronized across every department workflow", async () => {
   const [page, requirementPage, firebase] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),

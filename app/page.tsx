@@ -47,6 +47,7 @@ import {
   deleteAssetRecord,
   firebaseReady,
   getRequirementWindow,
+  removeRecord,
   saveRecord,
   saveRequirementWindow,
   signInAsAdmin,
@@ -263,6 +264,18 @@ export default function Home() {
     setMovements((rows) => rows.filter((movement) => movement.assetId !== asset.id));
     setSelectedAsset(null);
     flash("Asset and lifecycle history deleted");
+  }
+
+  async function deleteEmployee(employee: Employee) {
+    const assignedAssets = assets.filter((asset) => asset.employeeId === employee.id);
+    if (assignedAssets.length) {
+      flash(`Cannot delete ${employee.name} · return or reassign ${assignedAssets.length} asset${assignedAssets.length === 1 ? "" : "s"} first`);
+      return;
+    }
+    if (!window.confirm(`Permanently delete ${employee.name} (${employee.empNo})? Historical asset movements will be kept. This cannot be undone.`)) return;
+    await removeRecord("employees", employee.id);
+    setEmployees((rows) => rows.filter((row) => row.id !== employee.id));
+    flash("Employee record deleted");
   }
 
   async function addMovement(movement: Movement) {
@@ -483,6 +496,7 @@ export default function Home() {
               departments={departmentOptions}
               onAdd={() => setModal("employee")}
               onEdit={(employee) => { setEditingEmployee(employee); setModal("employeeEdit"); }}
+              onDelete={deleteEmployee}
               onDocument={openDocument}
             />
           )}
@@ -545,7 +559,7 @@ function Dashboard({ assets, requests, movements, employeeMap, assetMap, onView,
             {movements.slice(0, 5).map((movement) => (
               <div className="activity-row" key={movement.id}>
                 <div className={`activity-icon activity-${movement.type.toLowerCase()}`}>{movement.type === "Assigned" ? <ArrowLeftRight size={17} /> : movement.type === "Repair" ? <Wrench size={17} /> : <RotateCcw size={17} />}</div>
-                <div><strong>{assetMap[movement.assetId]?.name}</strong><p>{movement.type} {movement.employeeId && <>· {employeeMap[movement.employeeId]?.name}</>}</p></div>
+                <div><strong>{assetMap[movement.assetId]?.name}</strong><p>{movement.type} {movement.employeeId && <>· {employeeMap[movement.employeeId]?.name || movement.employeeName}</>}</p></div>
                 <time>{new Date(movement.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</time>
               </div>
             ))}
@@ -603,7 +617,7 @@ function AssetsView({ assets, allAssets, employeeMap, category, setCategory, onA
   );
 }
 
-function EmployeesView({ employees, assets, department, setDepartment, departments, onAdd, onEdit, onDocument }: { employees: Employee[]; assets: Asset[]; department: string; setDepartment: (value: string) => void; departments: string[]; onAdd: () => void; onEdit: (employee: Employee) => void; onDocument: (type: string, employeeId?: string, assetIds?: string[]) => void }) {
+function EmployeesView({ employees, assets, department, setDepartment, departments, onAdd, onEdit, onDelete, onDocument }: { employees: Employee[]; assets: Asset[]; department: string; setDepartment: (value: string) => void; departments: string[]; onAdd: () => void; onEdit: (employee: Employee) => void; onDelete: (employee: Employee) => void | Promise<void>; onDocument: (type: string, employeeId?: string, assetIds?: string[]) => void }) {
   return (
     <>
       <PageHead eyebrow="PEOPLE" title="Employees" description="See every employee and the full set of assets under their responsibility.">
@@ -614,7 +628,7 @@ function EmployeesView({ employees, assets, department, setDepartment, departmen
       <div className="employee-grid">
         {employees.map((employee) => {
           const owned = assets.filter((asset) => asset.employeeId === employee.id);
-          return <article className="employee-card" key={employee.id}><div className="employee-head"><span className="avatar">{initials(employee.name)}</span><span className={statusClass(employee.status)}>{employee.status}</span></div><h3>{employee.name}</h3><p>{employee.designation}</p><small>{employee.empNo} · {employee.department}</small><div className="asset-chip-row">{owned.length ? owned.slice(0, 3).map((asset) => <span key={asset.id}>{asset.type}</span>) : <em>No assets assigned</em>}{owned.length > 3 && <span>+{owned.length - 3}</span>}</div><div className="employee-foot"><strong>{owned.length} asset{owned.length !== 1 ? "s" : ""}</strong><div><button onClick={() => onEdit(employee)}><Pencil size={13} /> Edit</button><button onClick={() => onDocument("Asset Handover", employee.id, owned.map((asset) => asset.id))}>Document →</button></div></div></article>;
+          return <article className="employee-card" key={employee.id}><div className="employee-head"><span className="avatar">{initials(employee.name)}</span><span className={statusClass(employee.status)}>{employee.status}</span></div><h3>{employee.name}</h3><p>{employee.designation}</p><small>{employee.empNo} · {employee.department}</small><div className="asset-chip-row">{owned.length ? owned.slice(0, 3).map((asset) => <span key={asset.id}>{asset.type}</span>) : <em>No assets assigned</em>}{owned.length > 3 && <span>+{owned.length - 3}</span>}</div><div className="employee-foot"><strong>{owned.length} asset{owned.length !== 1 ? "s" : ""}</strong><div><button className="delete" aria-label={`Delete ${employee.name}`} title={owned.length ? "Return or reassign assets before deleting" : "Delete employee"} onClick={() => void onDelete(employee)}><Trash2 size={13} /> Delete</button><button onClick={() => onEdit(employee)}><Pencil size={13} /> Edit</button><button onClick={() => onDocument("Asset Handover", employee.id, owned.map((asset) => asset.id))}>Document →</button></div></div></article>;
         })}
       </div>
     </>
@@ -629,7 +643,7 @@ function MovementsView({ movements, assetMap, employeeMap, onAssign, onReturn, o
       </PageHead>
       <section className="panel timeline-panel">
         <div className="table-toolbar"><div><strong>Complete history</strong><small>Newest activity first</small></div><span className="audit-badge"><ShieldCheck size={15} />Audit-ready records</span></div>
-        <div className="timeline">{movements.length === 0 && <div className="empty-panel"><History size={20} /><strong>No lifecycle records yet</strong><span>Assignments, returns, clearance and repairs will appear here.</span></div>}{movements.map((movement) => <div key={movement.id} className="timeline-row"><div className={`timeline-mark activity-${movement.type.toLowerCase()}`}>{movement.type === "Assigned" ? <ArrowLeftRight size={17} /> : movement.type === "Repair" ? <Wrench size={17} /> : <RotateCcw size={17} />}</div><div><div className="timeline-title"><strong>{movement.type}</strong><span>{new Date(movement.date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</span></div><h3>{assetMap[movement.assetId]?.name} <small>{assetMap[movement.assetId]?.code}</small></h3><p>{movement.note}</p><span className="person-pill">{initials(employeeMap[movement.employeeId]?.name || "IT")} {employeeMap[movement.employeeId]?.name || "IT Department"}</span></div></div>)}</div>
+        <div className="timeline">{movements.length === 0 && <div className="empty-panel"><History size={20} /><strong>No lifecycle records yet</strong><span>Assignments, returns, clearance and repairs will appear here.</span></div>}{movements.map((movement) => { const movementEmployeeName = employeeMap[movement.employeeId]?.name || movement.employeeName || "IT Department"; return <div key={movement.id} className="timeline-row"><div className={`timeline-mark activity-${movement.type.toLowerCase()}`}>{movement.type === "Assigned" ? <ArrowLeftRight size={17} /> : movement.type === "Repair" ? <Wrench size={17} /> : <RotateCcw size={17} />}</div><div><div className="timeline-title"><strong>{movement.type}</strong><span>{new Date(movement.date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</span></div><h3>{assetMap[movement.assetId]?.name} <small>{assetMap[movement.assetId]?.code}</small></h3><p>{movement.note}</p><span className="person-pill">{initials(movementEmployeeName)} {movementEmployeeName}</span></div></div>; })}</div>
       </section>
     </>
   );
@@ -686,7 +700,7 @@ function AssetDrawer({ asset, employee, movements, employeeMap, onEdit, onDelete
   const [qr, setQr] = useState("");
   const [deleting, setDeleting] = useState(false);
   useEffect(() => { QRCode.toDataURL(`${window.location.origin}/asset/${asset.id}`, { width: 240, margin: 1, color: { dark: "#111827", light: "#ffffff" } }).then(setQr); }, [asset.id]);
-  return <><button className="drawer-backdrop" aria-label="Close asset details" onClick={onClose} /><aside className="drawer"><div className="drawer-head"><div><span>{asset.code}</span><h2>{asset.name}</h2></div><div className="drawer-head-actions"><button className="button button-danger" disabled={deleting} title={asset.employeeId ? "Permanently delete assigned asset" : "Permanently delete asset"} onClick={async () => { if (deleting) return; setDeleting(true); try { await onDelete(); } finally { setDeleting(false); } }}><Trash2 size={14} />{deleting ? "Deleting…" : "Delete"}</button><button className="button button-secondary" onClick={onEdit}><Pencil size={14} />Edit asset</button><button className="icon-button" aria-label="Close asset details" onClick={onClose}><X size={20} /></button></div></div><div className="drawer-body"><div className="asset-hero"><span className="asset-big-icon"><Monitor size={34} /></span><div><span className={statusClass(asset.status)}>{asset.status}</span><p>{asset.brand} · {asset.model}</p></div></div><section className="detail-section"><h3>Asset details</h3><div className="detail-grid">{asset.category === "IT Asset" ? <label>Serial number<strong>{asset.serial || "Not recorded"}</strong></label> : <label>Current location<strong>{asset.location || asset.custodianDepartment || "Not recorded"}</strong></label>}<label>Condition<strong>{asset.condition}</strong></label><label>Category<strong>{asset.category}</strong></label><label>Type<strong>{asset.type}</strong></label>{Object.entries(asset.specs ?? {}).filter(([, value]) => value).map(([key, value]) => <label key={key}>{specLabel(key)}<strong>{value}</strong></label>)}</div><p className="spec-box">{asset.details || "No additional notes recorded."}</p></section><section className="detail-section"><h3>Current custodian</h3>{employee ? <div className="owner-card"><span>{initials(employee.name)}</span><div><strong>{employee.name}</strong><small>{employee.empNo} · {employee.department}</small><a href={`mailto:${employee.email}`}>{employee.email}</a></div></div> : <div className="empty-owner"><Package size={21} />Available at {asset.location || "central stock"}</div>}</section><section className="detail-section qr-section"><div><h3>Live QR label</h3><p>Print and attach this code. Scanning always opens the latest asset record.</p><button className="button button-secondary" onClick={() => window.print()}><Printer size={16} />Print label</button></div>{qr && <img src={qr} alt={`QR code for ${asset.code}`} />}</section><section className="detail-section"><h3>History</h3><div className="mini-history">{movements.length ? movements.map((movement) => <div key={movement.id}><i /><div><strong>{movement.type}</strong><p>{employeeMap[movement.employeeId]?.name} · {movement.note}</p><small>{new Date(movement.date).toLocaleDateString("en-GB")}</small></div></div>) : <p className="muted">No previous movements.</p>}</div></section></div></aside></>;
+  return <><button className="drawer-backdrop" aria-label="Close asset details" onClick={onClose} /><aside className="drawer"><div className="drawer-head"><div><span>{asset.code}</span><h2>{asset.name}</h2></div><div className="drawer-head-actions"><button className="button button-danger" disabled={deleting} title={asset.employeeId ? "Permanently delete assigned asset" : "Permanently delete asset"} onClick={async () => { if (deleting) return; setDeleting(true); try { await onDelete(); } finally { setDeleting(false); } }}><Trash2 size={14} />{deleting ? "Deleting…" : "Delete"}</button><button className="button button-secondary" onClick={onEdit}><Pencil size={14} />Edit asset</button><button className="icon-button" aria-label="Close asset details" onClick={onClose}><X size={20} /></button></div></div><div className="drawer-body"><div className="asset-hero"><span className="asset-big-icon"><Monitor size={34} /></span><div><span className={statusClass(asset.status)}>{asset.status}</span><p>{asset.brand} · {asset.model}</p></div></div><section className="detail-section"><h3>Asset details</h3><div className="detail-grid">{asset.category === "IT Asset" ? <label>Serial number<strong>{asset.serial || "Not recorded"}</strong></label> : <label>Current location<strong>{asset.location || asset.custodianDepartment || "Not recorded"}</strong></label>}<label>Condition<strong>{asset.condition}</strong></label><label>Category<strong>{asset.category}</strong></label><label>Type<strong>{asset.type}</strong></label>{Object.entries(asset.specs ?? {}).filter(([, value]) => value).map(([key, value]) => <label key={key}>{specLabel(key)}<strong>{value}</strong></label>)}</div><p className="spec-box">{asset.details || "No additional notes recorded."}</p></section><section className="detail-section"><h3>Current custodian</h3>{employee ? <div className="owner-card"><span>{initials(employee.name)}</span><div><strong>{employee.name}</strong><small>{employee.empNo} · {employee.department}</small><a href={`mailto:${employee.email}`}>{employee.email}</a></div></div> : <div className="empty-owner"><Package size={21} />Available at {asset.location || "central stock"}</div>}</section><section className="detail-section qr-section"><div><h3>Live QR label</h3><p>Print and attach this code. Scanning always opens the latest asset record.</p><button className="button button-secondary" onClick={() => window.print()}><Printer size={16} />Print label</button></div>{qr && <img src={qr} alt={`QR code for ${asset.code}`} />}</section><section className="detail-section"><h3>History</h3><div className="mini-history">{movements.length ? movements.map((movement) => <div key={movement.id}><i /><div><strong>{movement.type}</strong><p>{employeeMap[movement.employeeId]?.name || movement.employeeName || "IT Department"} · {movement.note}</p><small>{new Date(movement.date).toLocaleDateString("en-GB")}</small></div></div>) : <p className="muted">No previous movements.</p>}</div></section></div></aside></>;
 }
 
 function Modal({ title, children, onClose, wide = false }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
