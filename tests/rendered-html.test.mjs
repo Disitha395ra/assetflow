@@ -178,17 +178,21 @@ test("allows repeated serial values while keeping asset records distinct", async
   assert.match(page, /<QrBatch assets=\{assets\} employeeMap=\{employeeMap\} departments=\{departmentOptions\}/);
 });
 
-test("exports a focused employee laptop register from live assignments", async () => {
+test("exports color-coded assigned and available reports for key asset types", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 
-  assert.match(page, /function exportEmployeeLaptopWorkbook\(\)/);
-  assert.match(page, /asset\.employeeId && asset\.category === "IT Asset" && asset\.type\.trim\(\)\.toLowerCase\(\) === "laptop"/);
+  assert.match(page, /REPORT_ASSET_TYPES = \["Laptop", "Mouse", "Headset", "Table", "Chair", "Monitor"\]/);
+  assert.match(page, /function exportAssetTypeWorkbook\(reportType: ReportAssetType\)/);
+  assert.match(page, /await import\("xlsx-js-style"\)/);
+  assert.match(page, /asset\.employeeId && asset\.status === "Assigned"/);
+  assert.match(page, /asset\.status === "Available" && !asset\.employeeId/);
   assert.match(page, /"Employee No": employee\?\.empNo/);
   assert.match(page, /"Asset Code": asset\.code/);
-  assert.match(page, /XLSX\.utils\.book_append_sheet\(workbook, worksheet, "Employee Laptops"\)/);
-  assert.match(page, /AssetFlow-employee-laptops-\$\{today\(\)\}\.xlsx/);
-  assert.match(page, /title: "Employee laptop register"/);
-  assert.match(page, /onExportEmployeeLaptops=\{exportEmployeeLaptopWorkbook\}/);
+  assert.match(page, /"Department \/ Location"/);
+  assert.match(page, /"DDEBF7" : "E2F0D9"/);
+  assert.match(page, /<h3>Employee & available asset report<\/h3>/);
+  assert.match(page, /onExportAssetType=\{exportAssetTypeWorkbook\}/);
+  assert.match(page, /Stock location \/ department/);
 });
 
 test("does not preselect same-name QR records assigned to one employee", async () => {

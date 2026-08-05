@@ -118,6 +118,9 @@ type View =
   | "Requirements"
   | "Reports";
 
+const REPORT_ASSET_TYPES = ["Laptop", "Mouse", "Headset", "Table", "Chair", "Monitor"] as const;
+type ReportAssetType = (typeof REPORT_ASSET_TYPES)[number];
+
 const nav = [
   { name: "Dashboard" as View, icon: LayoutDashboard },
   { name: "Assets" as View, icon: Package },
@@ -316,39 +319,65 @@ export default function Home() {
     flash("Excel report downloaded");
   }
 
-  async function exportEmployeeLaptopWorkbook() {
-    const XLSX = await import("xlsx");
-    const laptopRows = assets
-      .filter((asset) => asset.employeeId && asset.category === "IT Asset" && asset.type.trim().toLowerCase() === "laptop")
-      .map((asset) => {
-        const employee = employeeMap[asset.employeeId!];
-        return {
-          "Employee No": employee?.empNo ?? "",
-          Employee: employee?.name ?? asset.custodianName ?? "",
-          Email: employee?.email ?? "",
-          Department: employee?.department ?? asset.custodianDepartment ?? "",
-          Designation: employee?.designation ?? "",
-          "Asset Code": asset.code,
-          Laptop: asset.name,
-          Brand: asset.brand,
-          Model: asset.model,
-          "Serial Number": asset.serial,
-          Condition: asset.condition,
-          Status: asset.status,
-          Specifications: Object.entries(asset.specs ?? {}).map(([key, value]) => `${specLabel(key)}: ${value}`).join("; "),
-          Details: asset.details,
-        };
+  async function exportAssetTypeWorkbook(reportType: ReportAssetType) {
+    const XLSX = await import("xlsx-js-style");
+    const matchingAssets = assets.filter((asset) => asset.type.trim().toLowerCase() === reportType.toLowerCase());
+    const assignedAssets = matchingAssets
+      .filter((asset) => asset.employeeId && asset.status === "Assigned")
+      .sort((left, right) => {
+        const leftEmployee = employeeMap[left.employeeId!];
+        const rightEmployee = employeeMap[right.employeeId!];
+        return `${leftEmployee?.department ?? ""}|${leftEmployee?.name ?? ""}|${left.code}`.localeCompare(`${rightEmployee?.department ?? ""}|${rightEmployee?.name ?? ""}|${right.code}`);
       });
-    if (!laptopRows.length) {
-      flash("No employee laptop records to export");
+    const availableAssets = matchingAssets
+      .filter((asset) => asset.status === "Available" && !asset.employeeId)
+      .sort((left, right) => `${left.location ?? "IT Dept"}|${left.code}`.localeCompare(`${right.location ?? "IT Dept"}|${right.code}`));
+    const reportAssets = [...assignedAssets, ...availableAssets];
+    if (!reportAssets.length) {
+      flash(`No assigned or available ${reportType.toLowerCase()} records to export`);
       return;
     }
-    const worksheet = XLSX.utils.json_to_sheet(laptopRows);
-    worksheet["!cols"] = [12, 24, 28, 22, 22, 15, 26, 16, 18, 20, 12, 12, 38, 34].map((wch) => ({ wch }));
+    const reportRows = reportAssets.map((asset) => {
+      const employee = asset.employeeId ? employeeMap[asset.employeeId] : undefined;
+      const assigned = Boolean(employee || asset.employeeId);
+      return {
+        "Record Type": assigned ? "Assigned to employee" : "Available stock",
+        "Employee No": employee?.empNo ?? "",
+        Employee: employee?.name ?? asset.custodianName ?? "",
+        Email: employee?.email ?? "",
+        "Department / Location": assigned ? employee?.department ?? asset.custodianDepartment ?? "" : asset.location ?? asset.custodianDepartment ?? "IT Dept",
+        Designation: employee?.designation ?? "",
+        "Asset Code": asset.code,
+        Item: asset.name,
+        Brand: asset.brand,
+        Model: asset.model,
+        "Serial Number": asset.serial,
+        Condition: asset.condition,
+        Status: asset.status,
+        Specifications: Object.entries(asset.specs ?? {}).map(([key, value]) => `${specLabel(key)}: ${value}`).join("; "),
+        Details: asset.details,
+      };
+    });
+    const worksheet = XLSX.utils.json_to_sheet(reportRows);
+    const range = XLSX.utils.decode_range(worksheet["!ref"]!);
+    for (let column = range.s.c; column <= range.e.c; column += 1) {
+      const cell = worksheet[XLSX.utils.encode_cell({ r: 0, c: column })];
+      if (cell) cell.s = { fill: { fgColor: { rgb: "4F3AA8" } }, font: { bold: true, color: { rgb: "FFFFFF" } }, alignment: { vertical: "center", wrapText: true } };
+    }
+    reportRows.forEach((row, index) => {
+      const fillColor = row["Record Type"] === "Assigned to employee" ? "DDEBF7" : "E2F0D9";
+      for (let column = range.s.c; column <= range.e.c; column += 1) {
+        const cell = worksheet[XLSX.utils.encode_cell({ r: index + 1, c: column })];
+        if (cell) cell.s = { fill: { fgColor: { rgb: fillColor } }, alignment: { vertical: "top", wrapText: true }, border: { bottom: { style: "thin", color: { rgb: "D8DCE5" } } } };
+      }
+    });
+    worksheet["!cols"] = [20, 12, 24, 28, 24, 22, 15, 26, 16, 18, 20, 12, 12, 38, 34].map((wch) => ({ wch }));
+    worksheet["!autofilter"] = { ref: XLSX.utils.encode_range({ r: 0, c: 0 }, { r: range.e.r, c: range.e.c }) };
+    worksheet["!freeze"] = { xSplit: 0, ySplit: 1, topLeftCell: "A2", activePane: "bottomLeft", state: "frozen" };
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Employee Laptops");
-    XLSX.writeFile(workbook, `AssetFlow-employee-laptops-${today()}.xlsx`);
-    flash(`${laptopRows.length} employee laptop record${laptopRows.length === 1 ? "" : "s"} downloaded`);
+    XLSX.utils.book_append_sheet(workbook, worksheet, `${reportType} Report`);
+    XLSX.writeFile(workbook, `AssetFlow-${reportType.toLowerCase().replaceAll(" ", "-")}-report-${today()}.xlsx`);
+    flash(`${reportType} report downloaded · ${assignedAssets.length} assigned · ${availableAssets.length} available`);
   }
 
   function openDocument(type: string, employeeId = "", assetIds: string[] = []) {
@@ -464,7 +493,7 @@ export default function Home() {
             <RequirementsView requests={requests} setRequests={setRequests} windowConfig={requirementWindow} setWindowConfig={setRequirementWindow} onSchedule={() => setModal("schedule")} onAdd={() => setModal("request")} onExport={exportWorkbook} />
           )}
           {view === "Reports" && (
-            <ReportsView assets={assets} employees={employees} requests={requests} onExport={exportWorkbook} onExportEmployeeLaptops={exportEmployeeLaptopWorkbook} onDocument={openDocument} />
+            <ReportsView assets={assets} employees={employees} requests={requests} onExport={exportWorkbook} onExportAssetType={exportAssetTypeWorkbook} onDocument={openDocument} />
           )}
         </div>
       </section>
@@ -626,11 +655,13 @@ function RequirementsView({ requests, setRequests, windowConfig, setWindowConfig
   );
 }
 
-function ReportsView({ assets, employees, requests, onExport, onExportEmployeeLaptops, onDocument }: { assets: Asset[]; employees: Employee[]; requests: RequestRow[]; onExport: () => void; onExportEmployeeLaptops: () => void; onDocument: (type: string) => void }) {
-  const assignedLaptopCount = assets.filter((asset) => asset.employeeId && asset.category === "IT Asset" && asset.type.trim().toLowerCase() === "laptop").length;
+function ReportsView({ assets, employees, requests, onExport, onExportAssetType, onDocument }: { assets: Asset[]; employees: Employee[]; requests: RequestRow[]; onExport: () => void; onExportAssetType: (type: ReportAssetType) => void; onDocument: (type: string) => void }) {
+  const [reportType, setReportType] = useState<ReportAssetType>("Laptop");
+  const selectedAssets = assets.filter((asset) => asset.type.trim().toLowerCase() === reportType.toLowerCase());
+  const assignedCount = selectedAssets.filter((asset) => asset.employeeId && asset.status === "Assigned").length;
+  const availableCount = selectedAssets.filter((asset) => !asset.employeeId && asset.status === "Available").length;
   const cards = [
     { icon: FileSpreadsheet, title: "Current asset register", copy: `${assets.length} assets with current owners, departments and condition`, action: "Export Excel", click: onExport, tone: "green" },
-    { icon: Monitor, title: "Employee laptop register", copy: `${assignedLaptopCount} assigned laptop${assignedLaptopCount === 1 ? "" : "s"} with employee, department, asset and specification details`, action: "Export laptop Excel", click: onExportEmployeeLaptops, tone: "violet" },
     { icon: Users, title: "Employee asset summary", copy: `${employees.length} employees with every item currently assigned`, action: "Generate PDF", click: () => onDocument("Employee Asset Summary"), tone: "blue" },
     { icon: ArrowLeftRight, title: "Handover document", copy: "Formal issue sheet with item details and signature spaces", action: "Create document", click: () => onDocument("Asset Handover"), tone: "violet" },
     { icon: ClipboardCheck, title: "Clearance report", copy: "Selected returned items and final employee clearance statement", action: "Create clearance", click: () => onDocument("Employee Clearance"), tone: "orange" },
@@ -640,6 +671,7 @@ function ReportsView({ assets, employees, requests, onExport, onExportEmployeeLa
   return (
     <>
       <PageHead eyebrow="DOCUMENT CENTRE" title="Reports & documents" description="Generate live operational reports, handover forms and clearance records."><button className="button button-primary" onClick={onExport}><Download size={17} />Export all data</button></PageHead>
+      <article className="report-card report-card-featured"><div className="report-featured-copy"><span className="report-icon violet"><Monitor size={22} /></span><div><h3>Employee & available asset report</h3><p>Export assigned employee records and available stock with department or location in one color-coded Excel file.</p></div></div><div className="report-featured-controls"><label>Asset type<select value={reportType} onChange={(event) => setReportType(event.target.value as ReportAssetType)}>{REPORT_ASSET_TYPES.map((type) => <option key={type}>{type}</option>)}</select></label><div className="report-row-legend"><span className="assigned">{assignedCount} assigned</span><span className="available">{availableCount} available</span></div><button disabled={!assignedCount && !availableCount} onClick={() => onExportAssetType(reportType)}>Export {reportType} Excel<ArrowDownToLine size={16} /></button></div></article>
       <div className="report-grid">{cards.map(({ icon: Icon, title, copy, action, click, tone }) => <article className="report-card" key={title}><span className={`report-icon ${tone}`}><Icon size={22} /></span><h3>{title}</h3><p>{copy}</p><button onClick={click}>{action}<ArrowDownToLine size={16} /></button></article>)}</div>
     </>
   );
@@ -662,7 +694,8 @@ function Modal({ title, children, onClose, wide = false }: { title: string; chil
 }
 
 function AssetForm({ departments, onSave, initial }: { departments: string[]; onSave: (asset: Asset) => void | Promise<void>; initial?: Asset }) {
-  const [form, setForm] = useState({ category: initial?.category ?? "IT Asset", type: initial?.type ?? "Laptop", name: initial?.name ?? "", brand: initial?.brand ?? "", model: initial?.model ?? "", serial: initial?.serial ?? "", location: initial?.location ?? initial?.custodianDepartment ?? departments[0] ?? "", condition: initial?.condition ?? "Excellent", details: initial?.details ?? "" });
+  const defaultStockLocation = departments.find((department) => department.toLowerCase() === "it dept") ?? departments[0] ?? "";
+  const [form, setForm] = useState({ category: initial?.category ?? "IT Asset", type: initial?.type ?? "Laptop", name: initial?.name ?? "", brand: initial?.brand ?? "", model: initial?.model ?? "", serial: initial?.serial ?? "", location: initial?.location ?? initial?.custodianDepartment ?? defaultStockLocation, condition: initial?.condition ?? "Excellent", details: initial?.details ?? "" });
   const [specs, setSpecs] = useState<Record<string, string>>(initial?.specs ?? {});
   const [saving, setSaving] = useState(false);
   const assetId = useRef(initial?.id ?? crypto.randomUUID());
@@ -679,7 +712,7 @@ function AssetForm({ departments, onSave, initial }: { departments: string[]; on
   const nonItModels = isNonIt && form.type !== "Other"
     ? NON_IT_ITEM_MODELS[form.type as keyof typeof NON_IT_ITEM_MODELS]
     : null;
-  return <form className="form-grid" onSubmit={async (event) => { event.preventDefault(); if (submitting.current) return; submitting.current = true; setSaving(true); const prefix = form.category === "IT Asset" ? "IT" : "NIT"; try { await onSave({ ...initial, id: assetId.current, code: initial?.code ?? `${prefix}-${form.type.slice(0, 3).toUpperCase()}-${String(Date.now()).slice(-4)}`, ...form, serial: isNonIt ? "" : form.serial.trim(), location: isNonIt ? form.location : undefined, specs, category: form.category as Asset["category"], status: initial?.status ?? "Available", updatedAt: today() }); } finally { submitting.current = false; setSaving(false); } }}>
+  return <form className="form-grid" onSubmit={async (event) => { event.preventDefault(); if (submitting.current) return; submitting.current = true; setSaving(true); const prefix = form.category === "IT Asset" ? "IT" : "NIT"; try { await onSave({ ...initial, id: assetId.current, code: initial?.code ?? `${prefix}-${form.type.slice(0, 3).toUpperCase()}-${String(Date.now()).slice(-4)}`, ...form, serial: isNonIt ? "" : form.serial.trim(), location: form.location, specs, category: form.category as Asset["category"], status: initial?.status ?? "Available", updatedAt: today() }); } finally { submitting.current = false; setSaving(false); } }}>
     <label>Asset category<select value={form.category} onChange={(event) => { const nextCategory = event.target.value as keyof typeof ASSET_TYPES; setForm({ ...form, category: nextCategory, type: ASSET_TYPES[nextCategory][0], model: "", serial: nextCategory === "Non-IT Asset" ? "" : form.serial }); setSpecs({}); }}><option>IT Asset</option><option>Non-IT Asset</option></select></label>
     <label>Item type<select value={form.type} onChange={(event) => { setForm({ ...form, type: event.target.value, model: "" }); setSpecs({}); }}>{typeOptions.map((type) => <option key={type}>{type}</option>)}</select></label>
     <label className="full">Display name<input required placeholder="e.g. Lenovo ThinkPad E14" {...field("name")} /></label>
@@ -691,7 +724,7 @@ function AssetForm({ departments, onSave, initial }: { departments: string[]; on
           : <input required placeholder="Enter the other item type" {...field("model")} />}
       </label>
       : <label>Model<input required placeholder="ThinkPad E14 Gen 5" {...field("model")} /></label>}
-    {isNonIt ? <label className="full">Current location<select required {...field("location")}>{departments.map((department) => <option value={department} key={department}>{department}</option>)}</select></label> : <label className="full">Serial number<input required placeholder="Manufacturer or company serial number" {...field("serial")} /></label>}
+    {isNonIt ? <label className="full">Current location<select required {...field("location")}>{departments.map((department) => <option value={department} key={department}>{department}</option>)}</select></label> : <><label>Serial number<input required placeholder="Manufacturer or company serial number" {...field("serial")} /></label><label>Stock location / department<select required {...field("location")}>{departments.map((department) => <option value={department} key={department}>{department}</option>)}</select></label></>}
     {dynamicFields.length > 0 && <div className="asset-spec-heading full"><strong>{form.type} specifications</strong><span>Fields change automatically for the selected asset type.</span></div>}
     {dynamicFields.map((spec) => <label key={spec.key}>{spec.label}{spec.options ? <select required value={specs[spec.key] ?? ""} onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })}><option value="">Select {spec.label.toLowerCase()}</option>{spec.options.map((option) => <option key={option}>{option}</option>)}</select> : <input required value={specs[spec.key] ?? ""} placeholder={spec.placeholder} onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })} />}</label>)}
     <label>Condition<select {...field("condition")}><option>Excellent</option><option>Good</option><option>Fair</option><option>Repair</option></select></label>
