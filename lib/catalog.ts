@@ -46,6 +46,32 @@ export const NON_IT_ITEM_MODELS = {
   ],
 } as const;
 
+export const FURNITURE_IMAGE_OPTIONS = [
+  { key: "chair-01", type: "Chair", label: "Low Back Chair", model: "OCL-018", src: "/assets/furniture/chair-01.png" },
+  { key: "chair-02", type: "Chair", label: "Low Back Chair", model: "OCM-043", src: "/assets/furniture/chair-02.png" },
+  { key: "chair-03", type: "Chair", label: "Task Chair", model: "OCP-001", src: "/assets/furniture/chair-03.png" },
+  { key: "chair-04", type: "Chair", label: "Low Back Chair", model: "OCL-053", src: "/assets/furniture/chair-04.png" },
+  { key: "table-01", type: "Table", label: "Office Table", model: "KWT022", src: "/assets/furniture/table-01.png" },
+  { key: "table-02-alpha", type: "Table", label: "Alpha Office Table", model: "Alpha", src: "/assets/furniture/table-02-alpha.png" },
+] as const;
+
+export function furnitureImageForAsset(asset: { type: string; name?: string; model?: string; imageKey?: string }) {
+  const explicit = FURNITURE_IMAGE_OPTIONS.find((option) => option.key === asset.imageKey);
+  if (explicit) return explicit;
+  const searchable = `${asset.name ?? ""} ${asset.model ?? ""}`.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (asset.type === "Chair") {
+    if (searchable.includes("ocm043")) return FURNITURE_IMAGE_OPTIONS[1];
+    if (searchable.includes("ocp001")) return FURNITURE_IMAGE_OPTIONS[2];
+    if (searchable.includes("ocl053")) return FURNITURE_IMAGE_OPTIONS[3];
+    return FURNITURE_IMAGE_OPTIONS[0];
+  }
+  if (asset.type === "Table") {
+    if (searchable.includes("alpha")) return FURNITURE_IMAGE_OPTIONS[5];
+    return FURNITURE_IMAGE_OPTIONS[4];
+  }
+  return undefined;
+}
+
 export type AssetSpecField = {
   key: string;
   label: string;
