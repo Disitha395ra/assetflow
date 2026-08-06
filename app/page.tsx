@@ -473,7 +473,7 @@ function Dashboard({ assets, employees, departments, requests, movements, employ
         <Metric icon={ClipboardCheck} label="Available stock" value={available.toString()} change="Ready to assign" tone="green" />
         <Metric icon={Wrench} label="Needs attention" value={assets.filter((asset) => asset.status === "In repair").length.toString()} change="Items currently in repair" tone="orange" />
       </div>
-      <DepartmentAvailability assets={assets} employees={employees} departments={departments} onViewAssets={() => onView("Assets")} />
+      <DepartmentAvailability assets={assets} employees={employees} departments={departments} onViewAssets={() => onView("Assets")} onAsset={onAsset} />
       <div className="dashboard-grid">
         <section className="panel activity-panel">
           <PanelHead title="Recent activity" subtitle="Latest asset movements across the company" action="View all" onClick={() => onView("Movements")} />
@@ -515,8 +515,9 @@ function Dashboard({ assets, employees, departments, requests, movements, employ
   );
 }
 
-function DepartmentAvailability({ assets, employees, departments, onViewAssets }: { assets: Asset[]; employees: Employee[]; departments: string[]; onViewAssets: () => void }) {
+function DepartmentAvailability({ assets, employees, departments, onViewAssets, onAsset }: { assets: Asset[]; employees: Employee[]; departments: string[]; onViewAssets: () => void; onAsset: (asset: Asset) => void }) {
   const [selectedDepartment, setSelectedDepartment] = useState("All departments");
+  const [selectedType, setSelectedType] = useState("");
   const departmentAssets = assets.filter((asset) => {
     if (selectedDepartment === "All departments") return true;
     const currentDepartment = asset.custodianDepartment || asset.location || (asset.status === "Available" ? "Central Stock" : "");
@@ -530,11 +531,12 @@ function DepartmentAvailability({ assets, employees, departments, onViewAssets }
     summary[asset.type] = { total: current.total + 1, available: current.available + (asset.status === "Available" ? 1 : 0) };
     return summary;
   }, {})).sort(([, left], [, right]) => right.total - left.total);
+  const selectedAvailableAssets = availableAssets.filter((asset) => asset.type === selectedType);
 
   return <section className="panel department-availability">
     <div className="department-availability-head">
       <div><span className="section-kicker">DEPARTMENT OVERVIEW</span><h2>Asset availability summary</h2><p>See employee capacity and the current Chair, Table, Monitor and other asset totals for each department.</p></div>
-      <label>Department<select aria-label="Availability department" value={selectedDepartment} onChange={(event) => setSelectedDepartment(event.target.value)}><option>All departments</option><option>Central Stock</option>{departments.map((department) => <option key={department}>{department}</option>)}</select></label>
+      <label>Department<select aria-label="Availability department" value={selectedDepartment} onChange={(event) => { setSelectedDepartment(event.target.value); setSelectedType(""); }}><option>All departments</option><option>Central Stock</option>{departments.map((department) => <option key={department}>{department}</option>)}</select></label>
     </div>
     <div className="department-summary-metrics">
       <div><span><Users size={17} /></span><p>Active employees<strong>{activeEmployees.length}</strong></p></div>
@@ -542,7 +544,11 @@ function DepartmentAvailability({ assets, employees, departments, onViewAssets }
       <div><span><ClipboardCheck size={17} /></span><p>Available stock<strong>{availableAssets.length}</strong></p></div>
       <div><span><ArrowLeftRight size={17} /></span><p>Currently assigned<strong>{assignedAssets.length}</strong></p></div>
     </div>
-    {typeSummary.length ? <div className="asset-type-summary">{typeSummary.map(([type, totals]) => <article key={type}><div><strong>{type}</strong><span>{totals.available} available</span></div><b>{totals.total}</b><small>Total items</small></article>)}</div> : <div className="department-summary-empty"><Package size={20} /><span>No assets are currently recorded for this department.</span></div>}
+    {typeSummary.length ? <div className="asset-type-summary">{typeSummary.map(([type, totals]) => <button type="button" className={selectedType === type ? "active" : ""} key={type} aria-expanded={selectedType === type} aria-controls="available-asset-details" onClick={() => setSelectedType((current) => current === type ? "" : type)}><div><strong>{type}</strong><span>{totals.available} available</span></div><b>{totals.total}</b><small>{selectedType === type ? "Hide details" : "View available items"}</small></button>)}</div> : <div className="department-summary-empty"><Package size={20} /><span>No assets are currently recorded for this department.</span></div>}
+    {selectedType && <div className="available-asset-details" id="available-asset-details">
+      <div className="available-asset-details-head"><div><span>AVAILABLE ASSETS</span><h3>{selectedType} · {selectedDepartment}</h3></div><strong>{selectedAvailableAssets.length} item{selectedAvailableAssets.length === 1 ? "" : "s"}</strong></div>
+      {selectedAvailableAssets.length ? <div className="available-asset-list">{selectedAvailableAssets.map((asset) => <button type="button" key={asset.id} onClick={() => onAsset(asset)}><span className="available-asset-icon"><Package size={18} /></span><span className="available-asset-main"><strong>{asset.name}</strong><small>{asset.code} · {asset.category}</small></span><span className="available-asset-spec"><strong>{[asset.brand, asset.model].filter(Boolean).join(" · ") || "Brand / model not recorded"}</strong><small>{asset.serial || asset.location || "No serial or location"}</small></span><span className="available-asset-condition">{asset.condition}</span><ExternalLink size={15} /></button>)}</div> : <div className="available-asset-empty"><ClipboardCheck size={19} /><div><strong>No available {selectedType.toLowerCase()} items</strong><span>This department has {typeSummary.find(([type]) => type === selectedType)?.[1].total ?? 0} recorded, but all are currently assigned or otherwise unavailable.</span></div></div>}
+    </div>}
     <button className="department-summary-link" onClick={onViewAssets}>Open full asset register →</button>
   </section>;
 }
