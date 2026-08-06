@@ -27,7 +27,7 @@ test("ships public routes while allowing every verified administrator account", 
   assert.match(assetPage, /Lifecycle record/);
   assert.match(requirementPage, /SUBMISSIONS OPEN/);
   assert.match(requirementPage, /saveRecord\("requirements"/);
-  for (const email of ["it@scot.lk", "admin@scot.lk", "nimantha@scot.lk", "duminda@scot.lk", "shanka@scot.lk", "shamila@scot.lk", "yohan@scot.lk"]) {
+  for (const email of ["it@scot.lk", "admin@scot.lk", "nimantha@scot.lk", "duminda@scot.lk", "shanka@scot.lk", "shamila@scot.lk", "yohan@scot.lk", "hr@scot.lk", "sheran@scot.lk"]) {
     assert.ok(firebase.includes(`"${email}"`) || (email === "it@scot.lk" && firebase.includes('ADMIN_EMAIL = "it@scot.lk"')), `missing app access for ${email}`);
     assert.ok(rules.includes(`"${email}"`), `missing Firestore access for ${email}`);
   }

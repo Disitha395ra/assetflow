@@ -48,6 +48,8 @@ export const ADMIN_EMAILS = [
   "shanka@scot.lk",
   "shamila@scot.lk",
   "yohan@scot.lk",
+  "hr@scot.lk",
+  "sheran@scot.lk",
 ] as const;
 
 export function isAdminEmail(email: string | null | undefined) {
