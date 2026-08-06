@@ -64,3 +64,20 @@ test("summarizes assets and employees by department", async () => {
   assert.match(page, /summary\[asset\.type\]/);
   assert.match(css, /\.asset-type-summary/);
 });
+
+test("permanently removes the retired IT department and uses central stock", async () => {
+  const [page, catalog, firebase, publicAssetPage] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/catalog.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/asset/[id]/page.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.doesNotMatch(catalog, /"IT Dept"/);
+  assert.match(page, /purgeDepartmentData/);
+  assert.match(page, /assets\/\$\{assetId\}\/history/);
+  assert.match(page, /Delete all data/);
+  assert.match(page, /Central Stock/);
+  assert.match(firebase, /listRecords/);
+  assert.match(publicAssetPage, /currently in Central Stock/);
+});
