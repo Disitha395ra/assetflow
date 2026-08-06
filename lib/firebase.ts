@@ -12,6 +12,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   getFirestore,
   onSnapshot,
   runTransaction,
@@ -107,6 +108,12 @@ export async function saveRecord<T extends { id: string }>(
 export async function removeRecord(name: string, id: string) {
   if (!db) return;
   await deleteDoc(doc(db, name, id));
+}
+
+export async function listRecords<T extends { id: string }>(name: string) {
+  if (!db) return [];
+  const snapshot = await getDocs(collection(db, name));
+  return snapshot.docs.map((item) => item.data() as T);
 }
 
 export async function deleteAssetRecord(assetId: string, movementIds: string[]) {
