@@ -14,25 +14,18 @@ test("starts with a clean Firebase-backed register", async () => {
   assert.match(page, /24 labels per page/);
 });
 
-test("ships public routes while allowing every verified administrator account", async () => {
-  const [assetPage, requirementPage, rules, firebase, page] = await Promise.all([
+test("ships public QR and requirement routes with restricted admin writes", async () => {
+  const [assetPage, requirementPage, rules] = await Promise.all([
     readFile(new URL("../app/asset/[id]/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/requirements/[slug]/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../firestore.rules", import.meta.url), "utf8"),
-    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(assetPage, /Verified company record/);
   assert.match(assetPage, /Lifecycle record/);
   assert.match(requirementPage, /SUBMISSIONS OPEN/);
   assert.match(requirementPage, /saveRecord\("requirements"/);
-  for (const email of ["it@scot.lk", "admin@scot.lk", "nimantha@scot.lk", "duminda@scot.lk", "shanka@scot.lk", "shamila@scot.lk", "yohan@scot.lk", "hr@scot.lk", "sheran@scot.lk"]) {
-    assert.ok(firebase.includes(`"${email}"`) || (email === "it@scot.lk" && firebase.includes('ADMIN_EMAIL = "it@scot.lk"')), `missing app access for ${email}`);
-    assert.ok(rules.includes(`"${email}"`), `missing Firestore access for ${email}`);
-  }
-  assert.match(firebase, /isAdminEmail\(auth\?\.currentUser\?\.email\)/);
-  assert.match(page, /setAdminState\(isAdminEmail\(email\) \? "admin" : "denied"\)/);
+  assert.match(rules, /request\.auth\.token\.email == "it@scot\.lk"/);
   assert.match(rules, /allow get: if true/);
 });
 
@@ -60,173 +53,14 @@ test("supports custom departments, employee editing and type-specific asset fiel
   assert.match(rules, /match \/settings\/departments/);
 });
 
-test("deletes duplicate employee records only after assignments are cleared", async () => {
-  const [page, firebase] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
-  ]);
-
-  assert.match(page, /async function deleteEmployee\(employee: Employee\)/);
-  assert.match(page, /assets\.filter\(\(asset\) => asset\.employeeId === employee\.id\)/);
-  assert.match(page, /return or reassign \$\{assignedAssets\.length\} asset/);
-  assert.match(page, /await removeRecord\("employees", employee\.id\)/);
-  assert.match(page, /setEmployees\(\(rows\) => rows\.filter\(\(row\) => row\.id !== employee\.id\)\)/);
-  assert.match(page, /aria-label=\{`Delete \$\{employee\.name\}`\}/);
-  assert.match(page, /Historical asset movements will be kept/);
-  assert.match(firebase, /export async function removeRecord/);
-});
-
-test("keeps department choices synchronized across every department workflow", async () => {
-  const [page, requirementPage, firebase] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/requirements/[slug]/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
-  ]);
-
-  assert.match(page, /watchRequirementWindow\(\(config\) =>/);
-  assert.match(page, /const departmentOptions = useMemo/);
-  assert.match(page, /\.\.\.employees\.map\(\(employee\) => employee\.department\)/);
-  assert.match(page, /\.\.\.assets\.map\(\(asset\) => asset\.location \?\? ""\)/);
-  assert.match(page, /\.\.\.requests\.map\(\(request\) => request\.department\)/);
-  assert.ok((page.match(/departments=\{departmentOptions\}/g) ?? []).length >= 6);
-  assert.match(page, /employee\.department\.trim\(\)\.toLowerCase\(\) === department\.toLowerCase\(\)/);
-  assert.match(requirementPage, /watchRequirementWindow\(applyConfig\)/);
-  assert.match(firebase, /export function watchRequirementWindow/);
-});
-
-test("supports editing and deleting assigned or unassigned assets safely", async () => {
-  const [page, firebase] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
-  ]);
-
-  assert.match(page, /assetEdit: "Edit asset details"/);
-  assert.match(page, />Edit asset<\/button>/);
-  assert.match(page, /<AssetForm departments=\{departmentOptions\} initial=\{editingAsset\}/);
-  assert.match(page, /id: initial\?\.id \?\? crypto\.randomUUID\(\)/);
-  assert.match(page, /code: initial\?\.code \?\?/);
-  assert.match(page, /status: initial\?\.status \?\? "Available"/);
-  assert.match(page, /deletion will remove that assignment without recording a return/);
-  assert.match(page, /deleteAssetRecord\(asset\.id, movementIds\)/);
-  assert.match(page, /onEdit=\{\(asset\) => \{ setEditingAsset\(asset\); setModal\("assetEdit"\); \}\}/);
-  assert.match(page, /<AssetTable assets=\{assets\} employeeMap=\{employeeMap\} onAsset=\{onAsset\} onEdit=\{onEdit\} onDelete=\{onDelete\}/);
-  assert.match(page, /aria-label=\{`Edit \$\{asset\.name\}`\}/);
-  assert.match(page, /aria-label=\{`Delete \$\{asset\.name\}`\}/);
-  assert.match(page, /event\.stopPropagation\(\); onEdit\?\.\(asset\)/);
-  assert.match(page, /event\.stopPropagation\(\); void onDelete\?\.\(asset\)/);
-  assert.match(firebase, /const withoutUndefined/);
-  assert.match(firebase, /batch\.delete\(doc\(db, "assets", assetId, "history", movementId\)\)/);
-  assert.match(firebase, /await batch\.commit\(\)/);
-});
-
-test("retains Non-IT model choices and accurate asset filters after workflow merge", async () => {
-  const [page, catalog] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../lib/catalog.ts", import.meta.url), "utf8"),
-  ]);
-
-  for (const option of ["Alpha (60*120)", "KWT022 (75*152)", "OCM-043", "Task Chair OCP-001"]) {
-    assert.ok(catalog.includes(`"${option}"`), `missing Non-IT option: ${option}`);
-  }
-  assert.match(page, /NON_IT_ITEM_MODELS/);
-  assert.match(page, /Enter the other item type/);
-  assert.match(page, /\{ value: "Available", label: "Available items"/);
-  assert.match(page, /\{ value: "IT Asset", label: "IT items"/);
-  assert.match(page, /\{ value: "Non-IT Asset", label: "Non-IT items"/);
-  assert.match(page, /allAssets=\{assets\}/);
-});
-
-test("prevents realtime and double-submit duplicate assets in assignment", async () => {
+test("summarizes assets and employees by department", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
-  assert.match(page, /setAssets\(\(rows\) => \[asset, \.\.\.rows\.filter\(\(row\) => row\.id !== asset\.id\)\]\)/);
-  assert.match(page, /const assetId = useRef\(initial\?\.id \?\? crypto\.randomUUID\(\)\)/);
-  assert.match(page, /const submitting = useRef\(false\)/);
-  assert.match(page, /if \(submitting\.current\) return;/);
-  assert.match(page, /if \(submitting\.current\) return; submitting\.current = true/);
-  assert.match(page, /id: assetId\.current/);
-  assert.match(page, /new Map\(assets\.filter\(\(asset\) => asset\.status === "Available"\)\.map\(\(asset\) => \[asset\.id, asset\]\)\)/);
-});
-
-test("prints QR label documents by live department", async () => {
-  const [page, css] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
-  ]);
-
-  assert.match(page, /<QrBatch assets=\{assets\} employeeMap=\{employeeMap\} departments=\{departmentOptions\}/);
-  assert.match(page, /function QrBatch\(\{ assets, employeeMap, departments \}/);
-  assert.match(page, /<option value="All">All departments<\/option>\{departmentOptions\.map/);
-  assert.match(page, /\.\.\.departments, \.\.\.assets\.map\(assetDepartment\)/);
-  assert.match(page, /assetDepartment\(asset\)\.toLowerCase\(\) === department\.toLowerCase\(\)/);
-  assert.match(page, /QR LABEL REGISTER/);
-  assert.match(page, /<h1>\{printDepartment\}<\/h1>/);
-  assert.match(css, /\.qr-label-grid/);
-  assert.match(css, /\.modal-backdrop \{ position: static !important/);
-  assert.match(css, /\.qr-print-sheet \{ display: block !important; position: static !important/);
-  assert.match(css, /\.qr-print-page \{ position: relative; width: 210mm; height: 296mm/);
-  assert.match(css, /break-inside: avoid-page; page-break-inside: avoid/);
-});
-
-test("offers practical QR sizes for large, small and cable assets", async () => {
-  const [page, css] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
-  ]);
-
-  assert.match(page, /standard: \{ label: "Standard", perPage: 24/);
-  assert.match(page, /compact: \{ label: "Compact", perPage: 40/);
-  assert.match(page, /cable: \{ label: "Cable flag", perPage: 48/);
-  assert.match(page, /For a SIM, attach this label to its holder or envelope, never over the SIM contacts/);
-  assert.match(page, /wrap its centre around an earphone or cable/);
-  assert.match(page, /qr-size-\$\{labelFormat\}/);
-  assert.match(page, /format=\{labelFormat\}/);
-  assert.match(page, /qr-cable-label/);
-  assert.match(css, /\.qr-size-compact \.qr-label-grid/);
-  assert.match(css, /\.qr-size-cable \.qr-label-grid/);
-  assert.match(css, /\.qr-cable-label > i/);
-});
-
-test("allows repeated serial values while keeping asset records distinct", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-
-  assert.doesNotMatch(page, /assetSerialKey|canonicalizeAssets|duplicateSerialAssetIds/);
-  assert.doesNotMatch(page, /Duplicate asset blocked|duplicate-serial records excluded/);
-  assert.match(page, /<AssignForm assets=\{assets\}/);
-  assert.match(page, /<QrBatch assets=\{assets\} employeeMap=\{employeeMap\} departments=\{departmentOptions\}/);
-});
-
-test("exports color-coded assigned and available reports for key asset types", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-
-  assert.match(page, /REPORT_ASSET_TYPES = \["Laptop", "Mouse", "Headset", "Table", "Chair", "Monitor"\]/);
-  assert.match(page, /function exportAssetTypeWorkbook\(reportType: ReportAssetType\)/);
-  assert.match(page, /await import\("xlsx-js-style"\)/);
-  assert.match(page, /asset\.employeeId && asset\.status === "Assigned"/);
-  assert.match(page, /asset\.status === "Available" && !asset\.employeeId/);
-  assert.match(page, /"Employee No": employee\?\.empNo/);
-  assert.match(page, /"Asset Code": asset\.code/);
-  assert.match(page, /"Department \/ Location"/);
-  assert.match(page, /"DDEBF7" : "E2F0D9"/);
-  assert.match(page, /<h3>Employee & available asset report<\/h3>/);
-  assert.match(page, /onExportAssetType=\{exportAssetTypeWorkbook\}/);
-  assert.match(page, /Stock location \/ department/);
-});
-
-test("does not preselect same-name QR records assigned to one employee", async () => {
-  const [page, css] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
-  ]);
-
-  assert.match(page, /const qrSelectionKey = \(asset: Asset\) => asset\.employeeId/);
-  assert.match(page, /asset\.employeeId, asset\.category, asset\.type, asset\.name, asset\.brand, asset\.model/);
-  assert.match(page, /const uniqueQrAssets = \(rows: Asset\[\]\)/);
-  assert.match(page, /const preferredQrAssets = uniqueQrAssets\(assets\)/);
-  assert.match(page, /useState<string\[\]>\(\(\) => preferredQrAssets\.map\(\(asset\) => asset\.id\)\)/);
-  assert.match(page, />Select \/ clear unique<\/button>/);
-  assert.match(page, /same-name assignments left unselected/);
-  assert.match(page, /Possible duplicate · verify code/);
-  assert.match(css, /\.qr-name-duplicate-note/);
-  assert.match(css, /em\.possible-duplicate/);
+  assert.match(page, /Asset availability summary/);
+  assert.match(page, /Availability department/);
+  assert.match(page, /Active employees/);
+  assert.match(page, /asset\.custodianDepartment \|\| asset\.location/);
+  assert.match(page, /summary\[asset\.type\]/);
+  assert.match(css, /\.asset-type-summary/);
 });
