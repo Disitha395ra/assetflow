@@ -65,6 +65,19 @@ test("summarizes assets and employees by department", async () => {
   assert.match(css, /\.asset-type-summary/);
 });
 
+test("drills into available asset details from department cards", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(page, /selectedAvailableAssets/);
+  assert.match(page, /aria-controls="available-asset-details"/);
+  assert.match(page, /View available items/);
+  assert.match(page, /No available \{selectedType\.toLowerCase\(\)\} items/);
+  assert.match(page, /onClick=\{\(\) => onAsset\(asset\)\}/);
+  assert.match(css, /\.available-asset-details/);
+  assert.match(css, /\.available-asset-list/);
+});
+
 test("permanently removes the retired IT department and uses central stock", async () => {
   const [page, catalog, firebase, publicAssetPage] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
