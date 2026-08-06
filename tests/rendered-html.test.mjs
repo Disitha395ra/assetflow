@@ -78,6 +78,27 @@ test("drills into available asset details from department cards", async () => {
   assert.match(css, /\.available-asset-list/);
 });
 
+test("uses selectable furniture images across inventory and Excel exports", async () => {
+  const [page, publicAssetPage, catalog, css, packageJson] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/asset/[id]/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/catalog.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(catalog, /FURNITURE_IMAGE_OPTIONS/);
+  assert.match(catalog, /chair-04\.png/);
+  assert.match(catalog, /table-02-alpha\.png/);
+  assert.match(page, /Select \{form\.type\} design/);
+  assert.match(page, /furnitureImageForAsset\(asset\)/);
+  assert.match(page, /xl\/drawings\/drawing1\.xml/);
+  assert.match(page, /Excel report with asset images downloaded/);
+  assert.match(publicAssetPage, /public-furniture-image/);
+  assert.match(css, /\.furniture-picker/);
+  assert.match(packageJson, /"fflate"/);
+});
+
 test("permanently removes the retired IT department and uses central stock", async () => {
   const [page, catalog, firebase, publicAssetPage] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
