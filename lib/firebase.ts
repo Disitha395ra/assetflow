@@ -40,7 +40,15 @@ const app = firebaseReady
 export const db = app ? getFirestore(app) : null;
 export const auth = app ? getAuth(app) : null;
 export const ADMIN_EMAIL = "it@scot.lk";
-export const ADMIN_EMAILS = [ADMIN_EMAIL, "admin@scot.lk"] as const;
+export const ADMIN_EMAILS = [
+  ADMIN_EMAIL,
+  "admin@scot.lk",
+  "nimantha@scot.lk",
+  "duminda@scot.lk",
+  "shanka@scot.lk",
+  "shamila@scot.lk",
+  "yohan@scot.lk",
+] as const;
 
 export function isAdminEmail(email: string | null | undefined) {
   return ADMIN_EMAILS.some((adminEmail) => adminEmail === email?.trim().toLowerCase());

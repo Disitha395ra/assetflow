@@ -14,7 +14,7 @@ test("starts with a clean Firebase-backed register", async () => {
   assert.match(page, /24 labels per page/);
 });
 
-test("ships public routes while allowing both verified administrator accounts", async () => {
+test("ships public routes while allowing every verified administrator account", async () => {
   const [assetPage, requirementPage, rules, firebase, page] = await Promise.all([
     readFile(new URL("../app/asset/[id]/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/requirements/[slug]/page.tsx", import.meta.url), "utf8"),
@@ -27,8 +27,10 @@ test("ships public routes while allowing both verified administrator accounts", 
   assert.match(assetPage, /Lifecycle record/);
   assert.match(requirementPage, /SUBMISSIONS OPEN/);
   assert.match(requirementPage, /saveRecord\("requirements"/);
-  assert.match(rules, /request\.auth\.token\.email in \["it@scot\.lk", "admin@scot\.lk"\]/);
-  assert.match(firebase, /ADMIN_EMAILS = \[ADMIN_EMAIL, "admin@scot\.lk"\]/);
+  for (const email of ["it@scot.lk", "admin@scot.lk", "nimantha@scot.lk", "duminda@scot.lk", "shanka@scot.lk", "shamila@scot.lk", "yohan@scot.lk"]) {
+    assert.ok(firebase.includes(`"${email}"`) || (email === "it@scot.lk" && firebase.includes('ADMIN_EMAIL = "it@scot.lk"')), `missing app access for ${email}`);
+    assert.ok(rules.includes(`"${email}"`), `missing Firestore access for ${email}`);
+  }
   assert.match(firebase, /isAdminEmail\(auth\?\.currentUser\?\.email\)/);
   assert.match(page, /setAdminState\(isAdminEmail\(email\) \? "admin" : "denied"\)/);
   assert.match(rules, /allow get: if true/);

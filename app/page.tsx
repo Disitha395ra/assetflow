@@ -42,7 +42,6 @@ import QRCode from "qrcode";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ADMIN_EMAIL,
-  ADMIN_EMAILS,
   DEFAULT_REQUIREMENT_WINDOW,
   deleteAssetRecord,
   firebaseReady,
@@ -916,8 +915,7 @@ function ScheduleForm({ value, onSave }: { value: RequirementWindowRecord; onSav
 }
 
 function AdminGate({ state, email, onSignIn, onSignOut }: { state: "loading" | "signed-out" | "admin" | "denied"; email: string; onSignIn: () => void; onSignOut: () => void }) {
-  const adminLabel = ADMIN_EMAILS.join(" or ");
-  return <main className="admin-gate"><section><div className="admin-gate-brand"><ShieldCheck size={27} /><strong>AssetFlow</strong></div>{state === "loading" ? <><span className="gate-icon"><CircleDot size={27} /></span><h1>Verifying administrator…</h1></> : state === "denied" ? <><span className="gate-icon denied"><LockKeyhole size={27} /></span><h1>Dashboard access restricted</h1><p><strong>{email}</strong> is signed in, but only <strong>{adminLabel}</strong> can access company asset controls.</p><button className="button button-primary" onClick={onSignOut}><LogOut size={17} />Sign out and switch account</button></> : <><span className="gate-icon"><LockKeyhole size={27} /></span><h1>Administrator sign in</h1><p>Asset records, employee data and management controls are restricted to <strong>{adminLabel}</strong>.</p><button className="button button-primary" onClick={onSignIn}><ShieldCheck size={17} />Continue with Google</button></>}<small>Public QR records and department requirement forms do not expose this dashboard.</small></section></main>;
+  return <main className="admin-gate"><section><div className="admin-gate-brand"><ShieldCheck size={27} /><strong>AssetFlow</strong></div>{state === "loading" ? <><span className="gate-icon"><CircleDot size={27} /></span><h1>Verifying administrator…</h1></> : state === "denied" ? <><span className="gate-icon denied"><LockKeyhole size={27} /></span><h1>Dashboard access restricted</h1><p><strong>{email}</strong> is signed in, but this account is not on the AssetFlow administrator list.</p><button className="button button-primary" onClick={onSignOut}><LogOut size={17} />Sign out and switch account</button></> : <><span className="gate-icon"><LockKeyhole size={27} /></span><h1>Administrator sign in</h1><p>Asset records, employee data and management controls are restricted to <strong>approved SCOT administrator accounts</strong>.</p><button className="button button-primary" onClick={onSignIn}><ShieldCheck size={17} />Continue with Google</button></>}<small>Public QR records and department requirement forms do not expose this dashboard.</small></section></main>;
 }
 
 function PageHead({ eyebrow, title, description, children }: { eyebrow: string; title: string; description: string; children?: React.ReactNode }) {
