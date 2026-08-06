@@ -1,7 +1,6 @@
 export const DEFAULT_DEPARTMENTS = [
   "Admin Dept",
   "HR Dept",
-  "IT Dept",
   "SOBM Dept",
   "Marketing Dept",
   "Finance Dept",
