@@ -99,7 +99,7 @@ export default function PublicAssetPage() {
               {history.length ? history.sort((a, b) => b.date.localeCompare(a.date)).map((event) => (
                 <div key={event.id}>
                   <span>{event.type === "Repair" ? <Wrench size={15} /> : <ArrowLeftRight size={15} />}</span>
-                  <div><strong>{event.type}</strong><p>{event.employeeName || "IT Department"}{event.department ? ` · ${event.department}` : ""}</p><small>{event.note}</small></div>
+                  <div><strong>{event.type}</strong><p>{event.employeeName || "Asset Administration"}{event.department ? ` · ${event.department}` : ""}</p><small>{event.note}</small></div>
                   <time>{new Date(event.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</time>
                 </div>
               )) : <div className="public-empty-history"><Clock3 size={18} />No previous lifecycle events have been published.</div>}
@@ -110,7 +110,7 @@ export default function PublicAssetPage() {
         <aside>
           <article className="public-card public-custodian">
             <div className="public-card-title"><UserRound size={18} /><div><h2>Current custodian</h2><p>Live assignment status</p></div></div>
-            {asset.custodianName ? <><span className="public-avatar">{asset.custodianName.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><h3>{asset.custodianName}</h3><p><Building2 size={14} />{asset.custodianDepartment}</p></> : <div className="public-stock"><PackageCheck size={22} /><strong>Available in stock</strong><span>{asset.location ? `Current location: ${asset.location}` : "This item is currently under IT custody."}</span></div>}
+            {asset.custodianName ? <><span className="public-avatar">{asset.custodianName.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><h3>{asset.custodianName}</h3><p><Building2 size={14} />{asset.custodianDepartment}</p></> : <div className="public-stock"><PackageCheck size={22} /><strong>Available in stock</strong><span>{asset.location ? `Current location: ${asset.location}` : "This item is currently in Central Stock."}</span></div>}
           </article>
           <article className="public-verification">
             <ShieldCheck size={22} />
