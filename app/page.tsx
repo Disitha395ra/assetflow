@@ -806,6 +806,9 @@ function QrBatch({ assets, employees, departments, employeeMap }: { assets: Asse
   const [scope, setScope] = useState<"all" | "department" | "employee">("all");
   const [department, setDepartment] = useState(departments[0] ?? "");
   const [employeeId, setEmployeeId] = useState(employees[0]?.id ?? "");
+  const [labelSize, setLabelSize] = useState<"compact" | "small" | "extraSmall">("compact");
+  const departmentEmployees = employees.filter((employee) => employee.department === department);
+  const labelsPerPage = labelSize === "compact" ? 24 : labelSize === "small" ? 35 : 54;
   const filtered = assets.filter((asset) => {
     if (category !== "All" && asset.category !== category) return false;
     if (scope === "employee") return asset.employeeId === employeeId;
@@ -821,13 +824,14 @@ function QrBatch({ assets, employees, departments, employeeMap }: { assets: Asse
     <div className="qr-batch-toolbar qr-batch-filters">
       <label>Asset group<select value={category} onChange={(event) => setCategory(event.target.value)}><option>All</option><option>IT Asset</option><option>Non-IT Asset</option></select></label>
       <label>Print labels for<select aria-label="QR label scope" value={scope} onChange={(event) => setScope(event.target.value as "all" | "department" | "employee")}><option value="all">All assets</option><option value="department">One department</option><option value="employee">One employee</option></select></label>
-      {scope === "department" && <label>Department<select aria-label="QR label department" value={department} onChange={(event) => setDepartment(event.target.value)}>{departments.map((item) => <option key={item}>{item}</option>)}</select></label>}
-      {scope === "employee" && <label>Employee<select aria-label="QR label employee" value={employeeId} onChange={(event) => setEmployeeId(event.target.value)}>{employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} · {employee.department}</option>)}</select></label>}
+      {scope !== "all" && <label>Department<select aria-label="QR label department" value={department} onChange={(event) => { const nextDepartment = event.target.value; setDepartment(nextDepartment); setEmployeeId(employees.find((employee) => employee.department === nextDepartment)?.id ?? ""); }}>{departments.map((item) => <option key={item}>{item}</option>)}</select></label>}
+      {scope === "employee" && <label>Employee<select aria-label="QR label employee" value={employeeId} onChange={(event) => setEmployeeId(event.target.value)} disabled={!departmentEmployees.length}>{departmentEmployees.length ? departmentEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} · {employee.designation}</option>) : <option>No employees in this department</option>}</select></label>}
+      <label>Label size<select aria-label="QR label size" value={labelSize} onChange={(event) => setLabelSize(event.target.value as "compact" | "small" | "extraSmall")}><option value="compact">Compact — 24 per A4</option><option value="small">Small — 35 per A4</option><option value="extraSmall">Extra small — 54 per A4</option></select></label>
       <div><button className="button button-secondary" onClick={() => setSelected((rows) => filtered.every((asset) => rows.includes(asset.id)) ? rows.filter((id) => !filtered.some((asset) => asset.id === id)) : Array.from(new Set([...rows, ...filtered.map((asset) => asset.id)])))}><Check size={16} />Select / clear group</button><button className="button button-primary" disabled={!visible.length} onClick={() => window.print()}><Printer size={17} />Print {visible.length} labels</button></div>
     </div>
-    <div className="qr-batch-tip"><QrCode size={19} /><div><strong>Small labels for every item</strong><p>Select all assets, one department, or one employee, then print compact A4 labels. AssetFlow automatically arranges 24 small labels per page.</p></div></div>
+    <div className="qr-batch-tip"><QrCode size={19} /><div><strong>Small labels for every item</strong><p>Select a department first to narrow the employee list, then choose the label size that fits the item. This print run uses {labelsPerPage} labels per A4 page.</p></div></div>
     <div className="qr-select-list">{filtered.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial || asset.location || "No serial"}</small></span><em>{asset.employeeId ? employeeMap[asset.employeeId]?.name : "In stock"}</em></label>)}</div>
-    <section className="qr-print-sheet">{Array.from({ length: Math.ceil(visible.length / 24) }, (_, pageIndex) => <div className="qr-print-page" key={pageIndex}>{visible.slice(pageIndex * 24, pageIndex * 24 + 24).map((asset) => <QrLabel key={asset.id} asset={asset} owner={asset.employeeId ? employeeMap[asset.employeeId]?.name : undefined} />)}</div>)}</section>
+    <section className="qr-print-sheet">{Array.from({ length: Math.ceil(visible.length / labelsPerPage) }, (_, pageIndex) => <div className={`qr-print-page qr-size-${labelSize}`} key={pageIndex}>{visible.slice(pageIndex * labelsPerPage, pageIndex * labelsPerPage + labelsPerPage).map((asset) => <QrLabel key={asset.id} asset={asset} owner={asset.employeeId ? employeeMap[asset.employeeId]?.name : undefined} />)}</div>)}</section>
   </div>;
 }
 

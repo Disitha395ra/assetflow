@@ -429,6 +429,23 @@ select.status { appearance: none; cursor: pointer; padding-right: 8px; }
 .qr-select-list small { color: #9499a4; font-size: 7px; margin-top: 3px; }
 .qr-select-list em { color: #6d7480; font-size: 7.5px; font-style: normal; }
 .qr-print-sheet { display: none; }
+
+@media print {
+  .qr-print-page.qr-size-small { padding: 6mm; grid-template-columns: repeat(5, 1fr); grid-template-rows: repeat(7, 40mm); gap: 1.5mm; }
+  .qr-print-page.qr-size-small .qr-label { height: 40mm; grid-template-columns: 16mm minmax(0, 1fr); grid-template-rows: 5mm 1fr; padding: 1.5mm; }
+  .qr-print-page.qr-size-small .qr-label img { width: 15mm; height: 15mm; }
+  .qr-print-page.qr-size-small .qr-label-brand { font-size: 4.8pt; }
+  .qr-print-page.qr-size-small .qr-label > div:last-child strong { font-size: 5.5pt; max-height: 13pt; }
+  .qr-print-page.qr-size-small .qr-label > div:last-child span { font-size: 5pt; margin-top: .8mm; }
+  .qr-print-page.qr-size-small .qr-label > div:last-child small, .qr-print-page.qr-size-small .qr-label > div:last-child em { font-size: 3.8pt; margin-top: .5mm; }
+  .qr-print-page.qr-size-extraSmall { padding: 5mm; grid-template-columns: repeat(6, 1fr); grid-template-rows: repeat(9, 31mm); gap: 1mm; }
+  .qr-print-page.qr-size-extraSmall .qr-label { height: 31mm; grid-template-columns: 13mm minmax(0, 1fr); grid-template-rows: 4mm 1fr; padding: 1mm; }
+  .qr-print-page.qr-size-extraSmall .qr-label img { width: 12mm; height: 12mm; }
+  .qr-print-page.qr-size-extraSmall .qr-label-brand { font-size: 3.8pt; }
+  .qr-print-page.qr-size-extraSmall .qr-label > div:last-child strong { font-size: 4.5pt; max-height: 10pt; }
+  .qr-print-page.qr-size-extraSmall .qr-label > div:last-child span { font-size: 4.2pt; margin-top: .5mm; }
+  .qr-print-page.qr-size-extraSmall .qr-label > div:last-child small, .qr-print-page.qr-size-extraSmall .qr-label > div:last-child em { font-size: 3.2pt; margin-top: .3mm; }
+}
 .drawer-actions { display: flex; gap: 8px; margin-bottom: 13px; }
 .button-danger { background: #fff0f0; border-color: #f3bcbc; color: #ae3535; }
 .button-danger:hover { background: #ffe2e2; }

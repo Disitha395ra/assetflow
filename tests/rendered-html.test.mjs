@@ -11,7 +11,7 @@ test("starts with a clean Firebase-backed register", async () => {
   assert.match(page, /useState<RequestRow\[\]>\(\[\]\)/);
   assert.doesNotMatch(page, /demoAssets|demoEmployees|demoMovements|demoRequests/);
   assert.match(page, /Print \{visible\.length\} labels/);
-  assert.match(page, /24 small labels per page/);
+  assert.match(page, /Compact — 24 per A4/);
 });
 
 test("ships public QR and requirement routes with restricted admin writes", async () => {
@@ -45,9 +45,13 @@ test("grants every approved administrator full asset controls and supports scope
   assert.match(page, /Delete asset/);
   assert.match(page, /deleteAssetRecord/);
   assert.match(page, /QR label scope/);
+  assert.match(page, /departmentEmployees/);
+  assert.match(page, /QR label size/);
+  assert.match(page, /Extra small — 54 per A4/);
+  assert.match(page, /labelsPerPage/);
   assert.match(page, /One department/);
   assert.match(page, /One employee/);
-  assert.match(page, /24 small labels per page/);
+  assert.match(page, /Compact — 24 per A4/);
   assert.match(css, /\.qr-batch-filters/);
   assert.match(css, /\.button-danger/);
 });
