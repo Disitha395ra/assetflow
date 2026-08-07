@@ -11,7 +11,7 @@ test("starts with a clean Firebase-backed register", async () => {
   assert.match(page, /useState<RequestRow\[\]>\(\[\]\)/);
   assert.doesNotMatch(page, /demoAssets|demoEmployees|demoMovements|demoRequests/);
   assert.match(page, /Print \{visible\.length\} labels/);
-  assert.match(page, /24 labels per page/);
+  assert.match(page, /24 small labels per page/);
 });
 
 test("ships public QR and requirement routes with restricted admin writes", async () => {
@@ -25,8 +25,31 @@ test("ships public QR and requirement routes with restricted admin writes", asyn
   assert.match(assetPage, /Lifecycle record/);
   assert.match(requirementPage, /SUBMISSIONS OPEN/);
   assert.match(requirementPage, /saveRecord\("requirements"/);
-  assert.match(rules, /request\.auth\.token\.email == "it@scot\.lk"/);
+  assert.match(rules, /"it@scot\.lk"/);
   assert.match(rules, /allow get: if true/);
+});
+
+test("grants every approved administrator full asset controls and supports scoped small QR labels", async () => {
+  const [page, firebase, rules, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../firestore.rules", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+  for (const email of ["admin@scot.lk", "it@scot.lk", "shanaka@scot.lk", "duminda@scot.lk", "nimantha@scot.lk", "shamila@scot.lk", "niroshan@scot.lk", "musthaque@scot.lk", "sheran@scot.lk"]) {
+    assert.match(firebase, new RegExp(email.replace(".", "\\.")));
+    assert.match(rules, new RegExp(email.replace(".", "\\.")));
+  }
+  assert.match(page, /isAdminEmail\(email\)/);
+  assert.match(page, /Edit asset/);
+  assert.match(page, /Delete asset/);
+  assert.match(page, /deleteAssetRecord/);
+  assert.match(page, /QR label scope/);
+  assert.match(page, /One department/);
+  assert.match(page, /One employee/);
+  assert.match(page, /24 small labels per page/);
+  assert.match(css, /\.qr-batch-filters/);
+  assert.match(css, /\.button-danger/);
 });
 
 test("supports custom departments, employee editing and type-specific asset fields", async () => {
