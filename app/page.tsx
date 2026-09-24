@@ -579,7 +579,83 @@ export default function Home() {
 
             openDocument("Asset Handover", employeeId, assetIds);
           }} />}
-          {modal === "return" && <ReturnForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, clearance) => { for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Available", employeeId: undefined, location: asset.category === "Non-IT Asset" ? "Central Stock" : asset.location, custodianName: undefined, custodianDepartment: undefined, condition: "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: clearance ? "Cleared" : "Returned", date: today(), note: clearance ? "Returned during employee clearance" : "Returned to central stock" }); } openDocument(clearance ? "Employee Clearance" : "Asset Return", employeeId, assetIds); flash(clearance ? "Clearance report ready" : "Return document ready"); }} />}
+          {modal === "return" && <ReturnForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, email, shouldSendEmail, clearance, note) => {
+            const employee = employeeMap[employeeId];
+            const returnedAssets: Asset[] = [];
+            const returnNote = note || (clearance ? "Returned during employee clearance" : "Returned to central stock");
+
+            for (const assetId of assetIds) {
+              const asset = assets.find((row) => row.id === assetId)!;
+              const updatedAsset: Asset = {
+                ...asset,
+                status: "Available",
+                employeeId: undefined,
+                location: asset.category === "Non-IT Asset" ? "Central Stock" : asset.location,
+                custodianName: undefined,
+                custodianDepartment: undefined,
+                condition: "Good",
+                updatedAt: today(),
+              };
+              returnedAssets.push(updatedAsset);
+              await updateAsset(updatedAsset);
+              await addMovement({
+                id: crypto.randomUUID(),
+                assetId,
+                employeeId,
+                type: clearance ? "Cleared" : "Returned",
+                date: today(),
+                note: returnNote,
+              });
+            }
+
+            if (shouldSendEmail && email) {
+              try {
+                const res = await fetch("/api/send-return-email", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    employeeName: employee?.name || "Employee",
+                    employeeEmail: email,
+                    employeeDepartment: employee?.department || "Central Stock",
+                    employeeEmpNo: employee?.empNo || "",
+                    returnDate: today(),
+                    isClearance: clearance,
+                    note: returnNote,
+                    assets: returnedAssets.map((item) => ({
+                      id: item.id,
+                      name: item.name,
+                      code: item.code,
+                      category: item.category,
+                      type: item.type,
+                      brand: item.brand,
+                      model: item.model,
+                      serial: item.serial,
+                      location: item.location,
+                      condition: item.condition,
+                    })),
+                  }),
+                });
+                const emailData = await res.json();
+                if (emailData.success) {
+                  flash(`✓ ${assetIds.length} item${assetIds.length > 1 ? "s" : ""} returned & email sent to ${email} (CC: admin@scot.lk)`);
+                } else if (emailData.notConfigured) {
+                  flash(`⚠️ Assets returned, but email not sent: SMTP or RESEND_API_KEY is not configured in Vercel env.`);
+                  window.alert(
+                    `Assets returned successfully!\n\n⚠️ However, return confirmation email was NOT sent because Email Settings (SMTP or Resend) are not configured in Vercel Environment Variables yet.\n\nTo deliver real emails, please add SMTP_HOST, SMTP_USER, SMTP_PASS or RESEND_API_KEY in your Vercel Project Settings and redeploy.`,
+                  );
+                } else {
+                  flash(`⚠️ Assets returned, but email error: ${emailData.error || "delivery failed"}`);
+                }
+              } catch (emailErr) {
+                console.error("Return email error:", emailErr);
+                flash("⚠️ Assets returned, but email API call failed.");
+              }
+            } else {
+              flash(clearance ? "Clearance report ready" : "Return document ready");
+            }
+
+            openDocument(clearance ? "Employee Clearance" : "Asset Return", employeeId, assetIds);
+          }} />}
           {modal === "repair" && <RepairForm assets={assets} onSave={async (assetId, action, note) => { const asset = assets.find((row) => row.id === assetId); if (!asset) return; const nextStatus: AssetStatus = action === "start" ? "In repair" : asset.employeeId ? "Assigned" : "Available"; await updateAsset({ ...asset, status: nextStatus, condition: action === "start" ? "Repair" : "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId: asset.employeeId || "", type: "Repair", date: today(), note: `${action === "start" ? "Sent for repair" : "Repair completed"}: ${note}` }); setModal(null); flash(action === "start" ? "Repair record started" : "Repair completion recorded"); }} />}
           {modal === "request" && <RequestForm departments={departments} onSave={async (request) => { setRequests((rows) => [request, ...rows]); await saveRecord("requirements", request); setModal(null); flash("Requirement submitted"); }} />}
           {modal === "document" && <PrintableDocument type={documentType} employees={employees} assets={assets} initialEmployeeId={documentEmployeeId} initialAssetIds={documentAssetIds} />}
@@ -957,13 +1033,151 @@ function AssignForm({
   );
 }
 
-function ReturnForm({ assets, employees, onSave }: { assets: Asset[]; employees: Employee[]; onSave: (assetIds: string[], employeeId: string, clearance: boolean) => void }) {
+function ReturnForm({
+  assets,
+  employees,
+  onSave,
+}: {
+  assets: Asset[];
+  employees: Employee[];
+  onSave: (
+    assetIds: string[],
+    employeeId: string,
+    email: string,
+    sendEmail: boolean,
+    clearance: boolean,
+    note: string,
+  ) => Promise<void> | void;
+}) {
   const assignedEmployees = employees.filter((employee) => assets.some((asset) => asset.employeeId === employee.id));
   const [employeeId, setEmployeeId] = useState(assignedEmployees[0]?.id || "");
+  const currentEmployee = employees.find((emp) => emp.id === employeeId);
+  const [email, setEmail] = useState(currentEmployee?.email || "");
+  const [sendEmail, setSendEmail] = useState(true);
+  const [note, setNote] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [clearance, setClearance] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
   const owned = assets.filter((asset) => asset.employeeId === employeeId);
-  return <form onSubmit={(event) => { event.preventDefault(); if (selected.length) onSave(selected, employeeId, clearance); }}><label className="stacked-label">Employee<select value={employeeId} onChange={(event) => { setEmployeeId(event.target.value); setSelected([]); }}>{assignedEmployees.map((employee) => <option value={employee.id} key={employee.id}>{employee.name} · {employee.department}</option>)}</select></label><p className="field-heading">Choose returned items</p><div className="check-list">{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial || asset.location || "No serial"}</small></span><em>{asset.condition}</em></label>)}</div><label className="clearance-check"><input type="checkbox" checked={clearance} onChange={(event) => setClearance(event.target.checked)} /><span><strong>Employee clearance return</strong><small>Mark these items as part of final resignation clearance</small></span></label><FormActions text={clearance ? "Return & prepare clearance" : "Record return"} disabled={!selected.length} /></form>;
+
+  return (
+    <form
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (selected.length && !submitting) {
+          setSubmitting(true);
+          try {
+            await onSave(selected, employeeId, email.trim(), sendEmail, clearance, note.trim());
+          } finally {
+            setSubmitting(false);
+          }
+        }
+      }}
+    >
+      <label className="stacked-label">
+        Employee returning assets
+        <select
+          value={employeeId}
+          onChange={(event) => {
+            const nextId = event.target.value;
+            setEmployeeId(nextId);
+            setSelected([]);
+            const emp = employees.find((e) => e.id === nextId);
+            if (emp) setEmail(emp.email || "");
+          }}
+        >
+          {assignedEmployees.map((employee) => (
+            <option value={employee.id} key={employee.id}>
+              {employee.name} · {employee.department} ({employee.empNo})
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="stacked-label">
+        Employee confirmation email
+        <input
+          type="email"
+          required={sendEmail}
+          placeholder="e.g. employee@scot.lk"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+      </label>
+
+      <label className="email-toggle-check">
+        <input
+          type="checkbox"
+          checked={sendEmail}
+          onChange={(event) => setSendEmail(event.target.checked)}
+        />
+        <span>
+          <strong>Send return confirmation email to employee (CC: admin@scot.lk)</strong>
+          <small>
+            {clearance
+              ? "An official resignation clearance & return receipt will be dispatched and copied to admin@scot.lk."
+              : "An automated return receipt with custody discharge details will be dispatched and copied to admin@scot.lk."}
+          </small>
+        </span>
+      </label>
+
+      <label className="stacked-label">
+        Return remarks / condition note (optional)
+        <input
+          type="text"
+          placeholder="e.g. Good condition, returned to IT Central Stock, accessories complete"
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+        />
+      </label>
+
+      <p className="field-heading">Choose returned items ({selected.length} selected)</p>
+      <div className="check-list">
+        {owned.map((asset) => (
+          <label key={asset.id}>
+            <input
+              type="checkbox"
+              checked={selected.includes(asset.id)}
+              onChange={() =>
+                setSelected((rows) =>
+                  rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id],
+                )
+              }
+            />
+            <span>
+              <strong>{asset.name}</strong>
+              <small>{asset.code} · {asset.serial || asset.location || "No serial"}</small>
+            </span>
+            <em>{asset.condition}</em>
+          </label>
+        ))}
+      </div>
+
+      <label className="clearance-check">
+        <input
+          type="checkbox"
+          checked={clearance}
+          onChange={(event) => setClearance(event.target.checked)}
+        />
+        <span>
+          <strong>Employee clearance return</strong>
+          <small>Mark these items as part of final resignation clearance</small>
+        </span>
+      </label>
+
+      <FormActions
+        text={
+          submitting
+            ? "Processing return…"
+            : clearance
+              ? `Return ${selected.length || ""} & Prepare Clearance${sendEmail ? " & Send Email" : ""}`
+              : `Record Return (${selected.length || ""})${sendEmail ? " & Send Confirmation" : ""}`
+        }
+        disabled={!selected.length || submitting}
+      />
+    </form>
+  );
 }
 
 function RepairForm({ assets, onSave }: { assets: Asset[]; onSave: (assetId: string, action: "start" | "complete", note: string) => void }) {

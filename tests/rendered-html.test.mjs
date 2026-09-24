@@ -160,3 +160,19 @@ test("supports employee email confirmation on asset assignment and diagnostic au
   assert.match(css, /\.email-toggle-check/);
   assert.match(css, /\.gate-error-banner/);
 });
+
+test("supports employee email confirmation on asset returns and clearance", async () => {
+  const [page, returnApiRoute] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/send-return-email/route.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /Employee returning assets/);
+  assert.match(page, /Send return confirmation email to employee/);
+  assert.match(page, /\/api\/send-return-email/);
+  assert.match(returnApiRoute, /export async function POST/);
+  assert.match(returnApiRoute, /Asset Return Confirmation/);
+  assert.match(returnApiRoute, /admin@scot\.lk/);
+  assert.match(returnApiRoute, /Discharge of Custody/);
+});
+
