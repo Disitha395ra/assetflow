@@ -896,8 +896,8 @@ function AssignForm({
           onChange={(event) => setSendEmail(event.target.checked)}
         />
         <span>
-          <strong>Send email confirmation to employee</strong>
-          <small>An automated confirmation email containing all item specifications, serial numbers and handover details will be dispatched.</small>
+          <strong>Send email confirmation to employee (CC: admin@scot.lk)</strong>
+          <small>An automated confirmation email containing all item specifications, serial numbers and handover details will be dispatched to the employee and copied to admin@scot.lk.</small>
         </span>
       </label>
 

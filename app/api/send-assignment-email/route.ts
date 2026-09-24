@@ -58,6 +58,10 @@ export async function POST(req: Request) {
     const smtpPass = process.env.SMTP_PASS;
     const smtpFrom = process.env.SMTP_FROM || smtpUser || "AssetFlow <noreply@scot.lk>";
     const resendApiKey = process.env.RESEND_API_KEY;
+    const adminCcEmail = process.env.SMTP_CC || "admin@scot.lk";
+    const ccList = adminCcEmail && adminCcEmail.trim().toLowerCase() !== employeeEmail.trim().toLowerCase()
+      ? [adminCcEmail.trim()]
+      : [];
 
     // Asset rows HTML
     const assetRowsHtml = assets
@@ -174,7 +178,7 @@ export async function POST(req: Request) {
 
               <p style="margin: 0 0 4px; font-size: 14px; color: #1e293b;">Thank you,</p>
               <p style="margin: 0; font-size: 14px; font-weight: 600; color: #4338ca;">Asset Management Administration</p>
-              <p style="margin: 2px 0 0; font-size: 12px; color: #64748b;">AssetFlow Automated Notifications</p>
+              <p style="margin: 2px 0 0; font-size: 12px; color: #64748b;">AssetFlow Automated Notifications${ccList.length ? ` · CC: ${ccList.join(", ")}` : ""}</p>
             </td>
           </tr>
 
@@ -202,6 +206,7 @@ export async function POST(req: Request) {
         body: JSON.stringify({
           from: smtpFrom.includes("<") ? smtpFrom : `AssetFlow <${smtpFrom}>`,
           to: [employeeEmail],
+          ...(ccList.length ? { cc: ccList } : {}),
           subject: emailSubject,
           html: emailHtml,
         }),
@@ -211,7 +216,7 @@ export async function POST(req: Request) {
         return NextResponse.json({
           success: true,
           provider: "resend",
-          message: `Confirmation email successfully sent to ${employeeEmail}`,
+          message: `Confirmation email successfully sent to ${employeeEmail}${ccList.length ? ` (CC: ${ccList.join(", ")})` : ""}`,
         });
       } else {
         const errorText = await resendRes.text();
@@ -234,6 +239,7 @@ export async function POST(req: Request) {
       await transporter.sendMail({
         from: smtpFrom,
         to: employeeEmail,
+        ...(ccList.length ? { cc: ccList } : {}),
         subject: emailSubject,
         html: emailHtml,
       });
@@ -241,13 +247,13 @@ export async function POST(req: Request) {
       return NextResponse.json({
         success: true,
         provider: "smtp",
-        message: `Confirmation email successfully sent to ${employeeEmail}`,
+        message: `Confirmation email successfully sent to ${employeeEmail}${ccList.length ? ` (CC: ${ccList.join(", ")})` : ""}`,
       });
     }
 
     // 3. Fallback: Neither Resend nor SMTP is configured
     console.warn(
-      `[AssetFlow Email Simulation] Email requested for ${employeeEmail} with ${assets.length} assets, but neither SMTP (SMTP_HOST, SMTP_USER, SMTP_PASS) nor RESEND_API_KEY is set in environment variables.`
+      `[AssetFlow Email Simulation] Email requested for ${employeeEmail} (CC: ${ccList.join(", ")}) with ${assets.length} assets, but neither SMTP nor RESEND_API_KEY is set in environment variables.`
     );
 
     return NextResponse.json({

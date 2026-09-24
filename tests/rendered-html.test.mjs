@@ -156,6 +156,7 @@ test("supports employee email confirmation on asset assignment and diagnostic au
   assert.match(page, /auth\/unauthorized-domain/);
   assert.match(apiRoute, /export async function POST/);
   assert.match(apiRoute, /Asset Allocation Confirmation/);
+  assert.match(apiRoute, /admin@scot\.lk/);
   assert.match(css, /\.email-toggle-check/);
   assert.match(css, /\.gate-error-banner/);
 });
