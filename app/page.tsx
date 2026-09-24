@@ -560,20 +560,24 @@ export default function Home() {
                 });
                 const emailData = await res.json();
                 if (emailData.success) {
-                  emailStatusNotice = ` · Confirmation email sent to ${email}`;
+                  flash(`✓ ${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned & email sent to ${email} (CC: admin@scot.lk)`);
                 } else if (emailData.notConfigured) {
-                  emailStatusNotice = " · (Email SMTP/Resend not set in Vercel env)";
+                  flash(`⚠️ Assets assigned, but email not sent: SMTP or RESEND_API_KEY is not configured in Vercel env.`);
+                  window.alert(
+                    `Assets assigned successfully!\n\n⚠️ However, confirmation email was NOT sent because Email Settings (SMTP or Resend) are not configured in Vercel Environment Variables yet.\n\nTo deliver real emails, please add SMTP_HOST, SMTP_USER, SMTP_PASS or RESEND_API_KEY in your Vercel Project Settings and redeploy.`,
+                  );
                 } else {
-                  emailStatusNotice = ` · (Email notification: ${emailData.error || "failed"})`;
+                  flash(`⚠️ Assets assigned, but email error: ${emailData.error || "delivery failed"}`);
                 }
               } catch (emailErr) {
                 console.error("Assignment email error:", emailErr);
-                emailStatusNotice = " · (Email delivery error)";
+                flash("⚠️ Assets assigned, but email API call failed.");
               }
+            } else {
+              flash(`${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned — handover document ready`);
             }
 
             openDocument("Asset Handover", employeeId, assetIds);
-            flash(`${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned${emailStatusNotice} — handover document ready`);
           }} />}
           {modal === "return" && <ReturnForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, clearance) => { for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Available", employeeId: undefined, location: asset.category === "Non-IT Asset" ? "Central Stock" : asset.location, custodianName: undefined, custodianDepartment: undefined, condition: "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: clearance ? "Cleared" : "Returned", date: today(), note: clearance ? "Returned during employee clearance" : "Returned to central stock" }); } openDocument(clearance ? "Employee Clearance" : "Asset Return", employeeId, assetIds); flash(clearance ? "Clearance report ready" : "Return document ready"); }} />}
           {modal === "repair" && <RepairForm assets={assets} onSave={async (assetId, action, note) => { const asset = assets.find((row) => row.id === assetId); if (!asset) return; const nextStatus: AssetStatus = action === "start" ? "In repair" : asset.employeeId ? "Assigned" : "Available"; await updateAsset({ ...asset, status: nextStatus, condition: action === "start" ? "Repair" : "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId: asset.employeeId || "", type: "Repair", date: today(), note: `${action === "start" ? "Sent for repair" : "Repair completed"}: ${note}` }); setModal(null); flash(action === "start" ? "Repair record started" : "Repair completion recorded"); }} />}
