@@ -1084,14 +1084,14 @@ function AdminGate({ state, email, error, onSignIn, onSignOut }: { state: "loadi
           <>
             <span className="gate-icon denied"><LockKeyhole size={27} /></span>
             <h1>Dashboard access restricted</h1>
-            <p><strong>{email}</strong> is signed in, but only approved administrators can access company asset controls.</p>
+            <p><strong>{email}</strong> is signed in, but company asset controls are restricted to <strong>@scot.lk</strong> company accounts.</p>
             <button className="button button-primary" onClick={onSignOut}><LogOut size={17} />Sign out and switch account</button>
           </>
         ) : (
           <>
             <span className="gate-icon"><LockKeyhole size={27} /></span>
             <h1>Administrator sign in</h1>
-            <p>Asset records, employee data and management controls are restricted to verified administrators.</p>
+            <p>Sign in with your <strong>@scot.lk</strong> company account to manage company assets, assignments and requirements.</p>
             {error && (
               <div className="gate-error-banner">
                 <strong>Firebase Authentication Notice</strong>

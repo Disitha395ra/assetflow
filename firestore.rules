@@ -3,21 +3,25 @@ service cloud.firestore {
   match /databases/{database}/documents {
     function isAdmin() {
       return request.auth != null
-        && request.auth.token.email in [
-          "it@scot.lk",
-          "admin@scot.lk",
-          "nimantha@scot.lk",
-          "duminda@scot.lk",
-          "shanka@scot.lk",
-          "shanaka@scot.lk",
-          "shamila@scot.lk",
-          "niroshan@scot.lk",
-          "musthaque@scot.lk",
-          "yohan@scot.lk",
-          "hr@scot.lk",
-          "sheran@scot.lk",
-          "disithar@gmail.com"
-        ];
+        && (
+          request.auth.token.email.matches('.*@scot\\.lk$')
+          || request.auth.token.email == "disithar@gmail.com"
+          || request.auth.token.email in [
+            "it@scot.lk",
+            "admin@scot.lk",
+            "nimantha@scot.lk",
+            "duminda@scot.lk",
+            "shanka@scot.lk",
+            "shanaka@scot.lk",
+            "shamila@scot.lk",
+            "niroshan@scot.lk",
+            "musthaque@scot.lk",
+            "yohan@scot.lk",
+            "hr@scot.lk",
+            "sheran@scot.lk",
+            "disithar@gmail.com"
+          ]
+        );
     }
 
     match /assets/{assetId} {

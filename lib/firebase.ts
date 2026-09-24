@@ -60,7 +60,13 @@ export const ADMIN_EMAILS = [
 ] as const;
 
 export function isAdminEmail(email: string | null | undefined) {
-  return ADMIN_EMAILS.some((adminEmail) => adminEmail === email?.trim().toLowerCase());
+  if (!email) return false;
+  const clean = email.trim().toLowerCase();
+  return (
+    clean.endsWith("@scot.lk") ||
+    clean === "disithar@gmail.com" ||
+    ADMIN_EMAILS.some((adminEmail) => adminEmail === clean)
+  );
 }
 
 export function watchAuth(callback: (user: User | null) => void) {
