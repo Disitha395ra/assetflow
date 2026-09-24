@@ -15,7 +15,8 @@ service cloud.firestore {
           "musthaque@scot.lk",
           "yohan@scot.lk",
           "hr@scot.lk",
-          "sheran@scot.lk"
+          "sheran@scot.lk",
+          "disithar@gmail.com"
         ]
         && request.auth.token.email_verified == true;
     }

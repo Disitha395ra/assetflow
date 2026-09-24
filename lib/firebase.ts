@@ -21,13 +21,15 @@ import {
   writeBatch,
 } from "firebase/firestore";
 
+const getEnv = (val?: string, fallback: string = "") => (val && val.trim() ? val.trim() : fallback);
+
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ?? "AIzaSyCvhe9yXEVN1SSalm49ntrJQgvpY2KZ0EI",
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ?? "scot-inventory.firebaseapp.com",
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? "scot-inventory",
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ?? "scot-inventory.firebasestorage.app",
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ?? "380358714447",
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID ?? "1:380358714447:web:638d7860ea904ce068763a",
+  apiKey: getEnv(process.env.NEXT_PUBLIC_FIREBASE_API_KEY, "AIzaSyCvhe9yXEVN1SSalm49ntrJQgvpY2KZ0EI"),
+  authDomain: getEnv(process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN, "scot-inventory.firebaseapp.com"),
+  projectId: getEnv(process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID, "scot-inventory"),
+  storageBucket: getEnv(process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET, "scot-inventory.firebasestorage.app"),
+  messagingSenderId: getEnv(process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID, "380358714447"),
+  appId: getEnv(process.env.NEXT_PUBLIC_FIREBASE_APP_ID, "1:380358714447:web:638d7860ea904ce068763a"),
 };
 
 export const firebaseReady = Boolean(
@@ -54,6 +56,7 @@ export const ADMIN_EMAILS = [
   "yohan@scot.lk",
   "hr@scot.lk",
   "sheran@scot.lk",
+  "disithar@gmail.com",
 ] as const;
 
 export function isAdminEmail(email: string | null | undefined) {
@@ -82,11 +85,19 @@ export async function signOutAdmin() {
 export function watchCollection<T extends { id: string }>(
   name: string,
   callback: (rows: T[]) => void,
+  onError?: (error: Error) => void,
 ) {
   if (!db) return () => undefined;
-  return onSnapshot(collection(db, name), (snapshot) => {
-    callback(snapshot.docs.map((item) => item.data() as T));
-  });
+  return onSnapshot(
+    collection(db, name),
+    (snapshot) => {
+      callback(snapshot.docs.map((item) => item.data() as T));
+    },
+    (error) => {
+      console.error(`Error loading collection "${name}":`, error);
+      onError?.(error);
+    },
+  );
 }
 
 export async function saveRecord<T extends { id: string }>(

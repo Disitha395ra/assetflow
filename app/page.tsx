@@ -154,6 +154,7 @@ export default function Home() {
     firebaseReady ? "loading" : "admin",
   );
   const [signedInEmail, setSignedInEmail] = useState("");
+  const [authError, setAuthError] = useState("");
   const [requirementWindow, setRequirementWindow] = useState<RequirementWindowRecord>(DEFAULT_REQUIREMENT_WINDOW);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
@@ -180,11 +181,17 @@ export default function Home() {
 
   useEffect(() => {
     if (!firebaseReady || adminState !== "admin") return;
+    const handleCollectionError = (colName: string) => (err: Error) => {
+      console.error(`Collection ${colName} error:`, err);
+      if (err.message && err.message.toLowerCase().includes("permission")) {
+        flash(`Firestore access restricted for "${colName}". Please verify firestore.rules are published.`);
+      }
+    };
     const cleanups = [
-      watchCollection<Asset>("assets", setAssets),
-      watchCollection<Employee>("employees", setEmployees),
-      watchCollection<Movement>("movements", setMovements),
-      watchCollection<RequestRow>("requirements", setRequests),
+      watchCollection<Asset>("assets", setAssets, handleCollectionError("assets")),
+      watchCollection<Employee>("employees", setEmployees, handleCollectionError("employees")),
+      watchCollection<Movement>("movements", setMovements, handleCollectionError("movements")),
+      watchCollection<RequestRow>("requirements", setRequests, handleCollectionError("requirements")),
     ];
     getRequirementWindow().then((config) => {
       if (!config) return;
@@ -384,13 +391,21 @@ export default function Home() {
   const inventoryHealth = assets.length ? Math.round((healthyAssets / assets.length) * 100) : 100;
 
   if (firebaseReady && adminState !== "admin") {
-    return <AdminGate state={adminState} email={signedInEmail} onSignIn={async () => {
+    return <AdminGate state={adminState} email={signedInEmail} error={authError} onSignIn={async () => {
+      setAuthError("");
       try {
         await signInAsAdmin();
-      } catch {
+      } catch (err: unknown) {
+        console.error("Firebase Sign-in Error:", err);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        if (errMsg.includes("auth/unauthorized-domain")) {
+          setAuthError(`This domain (${typeof window !== "undefined" ? window.location.hostname : "Vercel"}) is not added in Firebase Console -> Authentication -> Settings -> Authorized domains.`);
+        } else {
+          setAuthError(errMsg);
+        }
         setAdminState("signed-out");
       }
-    }} onSignOut={signOutAdmin} />;
+    }} onSignOut={() => { setAuthError(""); void signOutAdmin(); }} />;
   }
 
   return (
@@ -496,7 +511,70 @@ export default function Home() {
           {modal === "employee" && <EmployeeForm departments={departments} onSave={async (employee) => { setEmployees((rows) => [employee, ...rows]); await saveRecord("employees", employee); setModal(null); flash("Employee added"); }} />}
           {modal === "employeeEdit" && editingEmployee && <EmployeeForm departments={departments} initial={editingEmployee} onSave={async (employee) => { setEmployees((rows) => rows.map((row) => row.id === employee.id ? employee : row)); await saveRecord("employees", employee); setEditingEmployee(null); setModal(null); flash("Employee details updated"); }} />}
           {modal === "departments" && <DepartmentManager departments={departments} employees={employees} onSave={async (items) => { const nextWindow = { ...requirementWindow, departments: items }; setDepartments(items); setRequirementWindow(nextWindow); await saveRequirementWindow(nextWindow); setModal(null); flash("Department list updated"); }} onPurge={async (department) => { const deleted = await purgeDepartmentData(department); setModal(null); flash(`${department} removed · ${deleted.assets} assets, ${deleted.employees} employees, ${deleted.movements} movements and ${deleted.requirements} requirements deleted`); }} />}
-          {modal === "assign" && <AssignForm assets={assets} employees={employees} onSave={async (assetIds, employeeId) => { const employee = employeeMap[employeeId]; for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Assigned", employeeId, location: asset.category === "Non-IT Asset" ? employee?.department : asset.location, custodianName: employee?.name, custodianDepartment: employee?.department, updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: "Assigned", date: today(), note: "Asset issued through AssetFlow" }); } openDocument("Asset Handover", employeeId, assetIds); flash(`${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned — handover document ready`); }} />}
+          {modal === "assign" && <AssignForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, email, shouldSendEmail, note) => {
+            const employee = employeeMap[employeeId];
+            const assignedAssets: Asset[] = [];
+            const movementNote = note || "Asset issued through AssetFlow";
+            for (const assetId of assetIds) {
+              const asset = assets.find((row) => row.id === assetId)!;
+              const updatedAsset: Asset = {
+                ...asset,
+                status: "Assigned",
+                employeeId,
+                location: asset.category === "Non-IT Asset" ? employee?.department : asset.location,
+                custodianName: employee?.name,
+                custodianDepartment: employee?.department,
+                updatedAt: today(),
+              };
+              assignedAssets.push(updatedAsset);
+              await updateAsset(updatedAsset);
+              await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: "Assigned", date: today(), note: movementNote });
+            }
+
+            let emailStatusNotice = "";
+            if (shouldSendEmail && email) {
+              try {
+                const res = await fetch("/api/send-assignment-email", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    employeeName: employee?.name || "Employee",
+                    employeeEmail: email,
+                    employeeDepartment: employee?.department || "Central Stock",
+                    employeeEmpNo: employee?.empNo || "",
+                    assignedDate: today(),
+                    note: movementNote,
+                    assets: assignedAssets.map((item) => ({
+                      id: item.id,
+                      name: item.name,
+                      code: item.code,
+                      category: item.category,
+                      type: item.type,
+                      brand: item.brand,
+                      model: item.model,
+                      serial: item.serial,
+                      location: item.location,
+                      condition: item.condition,
+                    })),
+                  }),
+                });
+                const emailData = await res.json();
+                if (emailData.success) {
+                  emailStatusNotice = ` · Confirmation email sent to ${email}`;
+                } else if (emailData.notConfigured) {
+                  emailStatusNotice = " · (Email SMTP/Resend not set in Vercel env)";
+                } else {
+                  emailStatusNotice = ` · (Email notification: ${emailData.error || "failed"})`;
+                }
+              } catch (emailErr) {
+                console.error("Assignment email error:", emailErr);
+                emailStatusNotice = " · (Email delivery error)";
+              }
+            }
+
+            openDocument("Asset Handover", employeeId, assetIds);
+            flash(`${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned${emailStatusNotice} — handover document ready`);
+          }} />}
           {modal === "return" && <ReturnForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, clearance) => { for (const assetId of assetIds) { const asset = assets.find((row) => row.id === assetId)!; await updateAsset({ ...asset, status: "Available", employeeId: undefined, location: asset.category === "Non-IT Asset" ? "Central Stock" : asset.location, custodianName: undefined, custodianDepartment: undefined, condition: "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: clearance ? "Cleared" : "Returned", date: today(), note: clearance ? "Returned during employee clearance" : "Returned to central stock" }); } openDocument(clearance ? "Employee Clearance" : "Asset Return", employeeId, assetIds); flash(clearance ? "Clearance report ready" : "Return document ready"); }} />}
           {modal === "repair" && <RepairForm assets={assets} onSave={async (assetId, action, note) => { const asset = assets.find((row) => row.id === assetId); if (!asset) return; const nextStatus: AssetStatus = action === "start" ? "In repair" : asset.employeeId ? "Assigned" : "Available"; await updateAsset({ ...asset, status: nextStatus, condition: action === "start" ? "Repair" : "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId: asset.employeeId || "", type: "Repair", date: today(), note: `${action === "start" ? "Sent for repair" : "Repair completed"}: ${note}` }); setModal(null); flash(action === "start" ? "Repair record started" : "Repair completion recorded"); }} />}
           {modal === "request" && <RequestForm departments={departments} onSave={async (request) => { setRequests((rows) => [request, ...rows]); await saveRecord("requirements", request); setModal(null); flash("Requirement submitted"); }} />}
@@ -741,11 +819,138 @@ function EmployeeForm({ departments, onSave, initial }: { departments: string[];
   return <form className="form-grid" onSubmit={(event) => { event.preventDefault(); onSave({ id: initial?.id ?? crypto.randomUUID(), ...form, status: form.status as Employee["status"] }); }}><label className="full">Full name<input required placeholder="Employee full name" {...field("name")} /></label><label>Employee number<input required placeholder="EMP-0001" {...field("empNo")} /></label><label>Email<input required type="email" placeholder="name@company.lk" {...field("email")} /></label><label>Department<select {...field("department")}>{departments.map((item) => <option key={item}>{item}</option>)}</select></label><label>Designation<input required placeholder="Job title" {...field("designation")} /></label><label>Employment status<select {...field("status")}><option>Active</option><option>Resigned</option></select></label><FormActions text={initial ? "Update employee" : "Add employee"} /></form>;
 }
 
-function AssignForm({ assets, employees, onSave }: { assets: Asset[]; employees: Employee[]; onSave: (assetIds: string[], employeeId: string) => void }) {
-  const [employeeId, setEmployeeId] = useState(employees[0]?.id || "");
+function AssignForm({
+  assets,
+  employees,
+  onSave,
+}: {
+  assets: Asset[];
+  employees: Employee[];
+  onSave: (
+    assetIds: string[],
+    employeeId: string,
+    email: string,
+    sendEmail: boolean,
+    note: string,
+  ) => Promise<void> | void;
+}) {
+  const activeEmployees = employees.filter((employee) => employee.status === "Active");
+  const [employeeId, setEmployeeId] = useState(activeEmployees[0]?.id || "");
+  const currentEmployee = employees.find((emp) => emp.id === employeeId);
+  const [email, setEmail] = useState(currentEmployee?.email || "");
+  const [sendEmail, setSendEmail] = useState(true);
+  const [note, setNote] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+
   const available = assets.filter((asset) => asset.status === "Available");
-  return <form onSubmit={(event) => { event.preventDefault(); if (selected.length) onSave(selected, employeeId); }}><label className="stacked-label">Assign to<select value={employeeId} onChange={(event) => setEmployeeId(event.target.value)}>{employees.filter((employee) => employee.status === "Active").map((employee) => <option value={employee.id} key={employee.id}>{employee.name} · {employee.department}</option>)}</select></label><p className="field-heading">Select one or more available items</p><div className="check-list">{available.map((asset) => { const furniture = furnitureImageForAsset(asset); return <label key={asset.id}>{furniture && <img className="check-list-image" src={furniture.src} alt="" />}<input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial || asset.location || "No serial"}</small></span><em>{asset.type}</em></label>; })}</div><FormActions text={`Assign ${selected.length || ""} item${selected.length === 1 ? "" : "s"}`} disabled={!selected.length} /></form>;
+
+  return (
+    <form
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (selected.length && !submitting) {
+          setSubmitting(true);
+          try {
+            await onSave(selected, employeeId, email.trim(), sendEmail, note.trim());
+          } finally {
+            setSubmitting(false);
+          }
+        }
+      }}
+    >
+      <label className="stacked-label">
+        Assign to employee
+        <select
+          value={employeeId}
+          onChange={(event) => {
+            const nextId = event.target.value;
+            setEmployeeId(nextId);
+            const emp = employees.find((e) => e.id === nextId);
+            if (emp) setEmail(emp.email || "");
+          }}
+        >
+          {activeEmployees.map((employee) => (
+            <option value={employee.id} key={employee.id}>
+              {employee.name} · {employee.department} ({employee.empNo})
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="stacked-label">
+        Employee confirmation email
+        <input
+          type="email"
+          required={sendEmail}
+          placeholder="e.g. employee@scot.lk"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+      </label>
+
+      <label className="email-toggle-check">
+        <input
+          type="checkbox"
+          checked={sendEmail}
+          onChange={(event) => setSendEmail(event.target.checked)}
+        />
+        <span>
+          <strong>Send email confirmation to employee</strong>
+          <small>An automated confirmation email containing all item specifications, serial numbers and handover details will be dispatched.</small>
+        </span>
+      </label>
+
+      <label className="stacked-label">
+        Assignment note (optional)
+        <input
+          type="text"
+          placeholder="e.g. Work from home equipment, Laptop renewal, Project deployment"
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+        />
+      </label>
+
+      <p className="field-heading">Select one or more available items ({selected.length} selected)</p>
+      <div className="check-list">
+        {available.map((asset) => {
+          const furniture = furnitureImageForAsset(asset);
+          return (
+            <label key={asset.id}>
+              {furniture && <img className="check-list-image" src={furniture.src} alt="" />}
+              <input
+                type="checkbox"
+                checked={selected.includes(asset.id)}
+                onChange={() =>
+                  setSelected((rows) =>
+                    rows.includes(asset.id)
+                      ? rows.filter((id) => id !== asset.id)
+                      : [...rows, asset.id],
+                  )
+                }
+              />
+              <span>
+                <strong>{asset.name}</strong>
+                <small>
+                  {asset.code} · {asset.serial || asset.location || "No serial"}
+                </small>
+              </span>
+              <em>{asset.type}</em>
+            </label>
+          );
+        })}
+      </div>
+
+      <FormActions
+        text={
+          submitting
+            ? "Assigning items…"
+            : `Assign ${selected.length || ""} item${selected.length === 1 ? "" : "s"}${sendEmail ? " & Send Confirmation" : ""}`
+        }
+        disabled={!selected.length || submitting}
+      />
+    </form>
+  );
 }
 
 function ReturnForm({ assets, employees, onSave }: { assets: Asset[]; employees: Employee[]; onSave: (assetIds: string[], employeeId: string, clearance: boolean) => void }) {
@@ -865,8 +1070,41 @@ function ScheduleForm({ value, onSave }: { value: RequirementWindowRecord; onSav
   </form>;
 }
 
-function AdminGate({ state, email, onSignIn, onSignOut }: { state: "loading" | "signed-out" | "admin" | "denied"; email: string; onSignIn: () => void; onSignOut: () => void }) {
-  return <main className="admin-gate"><section><div className="admin-gate-brand"><ShieldCheck size={27} /><strong>AssetFlow</strong></div>{state === "loading" ? <><span className="gate-icon"><CircleDot size={27} /></span><h1>Verifying administrator…</h1></> : state === "denied" ? <><span className="gate-icon denied"><LockKeyhole size={27} /></span><h1>Dashboard access restricted</h1><p><strong>{email}</strong> is signed in, but only <strong>{ADMIN_EMAIL}</strong> can access company asset controls.</p><button className="button button-primary" onClick={onSignOut}><LogOut size={17} />Sign out and switch account</button></> : <><span className="gate-icon"><LockKeyhole size={27} /></span><h1>Administrator sign in</h1><p>Asset records, employee data and management controls are restricted to <strong>{ADMIN_EMAIL}</strong>.</p><button className="button button-primary" onClick={onSignIn}><ShieldCheck size={17} />Continue with Google</button></>}<small>Public QR records and department requirement forms do not expose this dashboard.</small></section></main>;
+function AdminGate({ state, email, error, onSignIn, onSignOut }: { state: "loading" | "signed-out" | "admin" | "denied"; email: string; error?: string; onSignIn: () => void; onSignOut: () => void }) {
+  return (
+    <main className="admin-gate">
+      <section>
+        <div className="admin-gate-brand"><ShieldCheck size={27} /><strong>AssetFlow</strong></div>
+        {state === "loading" ? (
+          <>
+            <span className="gate-icon"><CircleDot size={27} /></span>
+            <h1>Verifying administrator…</h1>
+          </>
+        ) : state === "denied" ? (
+          <>
+            <span className="gate-icon denied"><LockKeyhole size={27} /></span>
+            <h1>Dashboard access restricted</h1>
+            <p><strong>{email}</strong> is signed in, but only approved administrators can access company asset controls.</p>
+            <button className="button button-primary" onClick={onSignOut}><LogOut size={17} />Sign out and switch account</button>
+          </>
+        ) : (
+          <>
+            <span className="gate-icon"><LockKeyhole size={27} /></span>
+            <h1>Administrator sign in</h1>
+            <p>Asset records, employee data and management controls are restricted to verified administrators.</p>
+            {error && (
+              <div className="gate-error-banner">
+                <strong>Firebase Authentication Notice</strong>
+                {error}
+              </div>
+            )}
+            <button className="button button-primary" onClick={onSignIn}><ShieldCheck size={17} />Continue with Google</button>
+          </>
+        )}
+        <small>Public QR records and department requirement forms do not expose this dashboard.</small>
+      </section>
+    </main>
+  );
 }
 
 function PageHead({ eyebrow, title, description, children }: { eyebrow: string; title: string; description: string; children?: React.ReactNode }) {

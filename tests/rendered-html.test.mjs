@@ -142,3 +142,20 @@ test("permanently removes the retired IT department and uses central stock", asy
   assert.match(firebase, /listRecords/);
   assert.match(publicAssetPage, /currently in Central Stock/);
 });
+
+test("supports employee email confirmation on asset assignment and diagnostic auth error feedback", async () => {
+  const [page, apiRoute, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/send-assignment-email/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /Employee confirmation email/);
+  assert.match(page, /Send email confirmation to employee/);
+  assert.match(page, /\/api\/send-assignment-email/);
+  assert.match(page, /auth\/unauthorized-domain/);
+  assert.match(apiRoute, /export async function POST/);
+  assert.match(apiRoute, /Asset Allocation Confirmation/);
+  assert.match(css, /\.email-toggle-check/);
+  assert.match(css, /\.gate-error-banner/);
+});
