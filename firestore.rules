@@ -17,13 +17,13 @@ service cloud.firestore {
           "hr@scot.lk",
           "sheran@scot.lk",
           "disithar@gmail.com"
-        ]
-        && request.auth.token.email_verified == true;
+        ];
     }
 
     match /assets/{assetId} {
       allow get: if true;
-      allow list, create, update, delete: if isAdmin();
+      allow list: if request.auth != null;
+      allow create, update, delete: if isAdmin();
 
       match /history/{eventId} {
         allow read: if true;
@@ -32,12 +32,14 @@ service cloud.firestore {
     }
 
     match /employees/{employeeId} {
-      allow read, write: if isAdmin();
+      allow read: if request.auth != null;
+      allow write: if isAdmin();
     }
 
     match /movements/{movementId} {
       allow get: if true;
-      allow list, create, update, delete: if isAdmin();
+      allow list: if request.auth != null;
+      allow create, update, delete: if isAdmin();
     }
 
     match /settings/requirement-window {
