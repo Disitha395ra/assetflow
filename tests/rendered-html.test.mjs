@@ -157,6 +157,8 @@ test("supports employee email confirmation on asset assignment and diagnostic au
   assert.match(apiRoute, /export async function POST/);
   assert.match(apiRoute, /Asset Allocation Confirmation/);
   assert.match(apiRoute, /admin@scot\.lk/);
+  assert.match(apiRoute, /it@scot\.lk/);
+  assert.match(apiRoute, /hr@scot\.lk/);
   assert.match(css, /\.email-toggle-check/);
   assert.match(css, /\.gate-error-banner/);
 });
@@ -173,6 +175,8 @@ test("supports employee email confirmation on asset returns and clearance", asyn
   assert.match(returnApiRoute, /export async function POST/);
   assert.match(returnApiRoute, /Asset Return Confirmation/);
   assert.match(returnApiRoute, /admin@scot\.lk/);
+  assert.match(returnApiRoute, /it@scot\.lk/);
+  assert.match(returnApiRoute, /hr@scot\.lk/);
   assert.match(returnApiRoute, /Discharge of Custody/);
 });
 

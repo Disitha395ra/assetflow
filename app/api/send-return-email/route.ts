@@ -60,10 +60,14 @@ export async function POST(req: Request) {
     const smtpPass = process.env.SMTP_PASS;
     const smtpFrom = process.env.SMTP_FROM || smtpUser || "AssetFlow <noreply@scot.lk>";
     const resendApiKey = process.env.RESEND_API_KEY;
-    const adminCcEmail = process.env.SMTP_CC || "admin@scot.lk";
-    const ccList = adminCcEmail && adminCcEmail.trim().toLowerCase() !== employeeEmail.trim().toLowerCase()
-      ? [adminCcEmail.trim()]
+    const defaultCc = ["admin@scot.lk", "it@scot.lk", "hr@scot.lk"];
+    const envCc = process.env.SMTP_CC
+      ? process.env.SMTP_CC.split(",").map((s) => s.trim()).filter(Boolean)
       : [];
+    const allCc = Array.from(new Set([...defaultCc, ...envCc]));
+    const ccList = allCc.filter(
+      (c) => c.toLowerCase() !== employeeEmail.trim().toLowerCase()
+    );
 
     // Asset rows HTML
     const assetRowsHtml = assets

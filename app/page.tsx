@@ -560,7 +560,7 @@ export default function Home() {
                 });
                 const emailData = await res.json();
                 if (emailData.success) {
-                  flash(`✓ ${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned & email sent to ${email} (CC: admin@scot.lk)`);
+                  flash(`✓ ${assetIds.length} item${assetIds.length > 1 ? "s" : ""} assigned & email sent to ${email} (CC: admin@scot.lk, it@scot.lk, hr@scot.lk)`);
                 } else if (emailData.notConfigured) {
                   flash(`⚠️ Assets assigned, but email not sent: SMTP or RESEND_API_KEY is not configured in Vercel env.`);
                   window.alert(
@@ -637,7 +637,7 @@ export default function Home() {
                 });
                 const emailData = await res.json();
                 if (emailData.success) {
-                  flash(`✓ ${assetIds.length} item${assetIds.length > 1 ? "s" : ""} returned & email sent to ${email} (CC: admin@scot.lk)`);
+                  flash(`✓ ${assetIds.length} item${assetIds.length > 1 ? "s" : ""} returned & email sent to ${email} (CC: admin@scot.lk, it@scot.lk, hr@scot.lk)`);
                 } else if (emailData.notConfigured) {
                   flash(`⚠️ Assets returned, but email not sent: SMTP or RESEND_API_KEY is not configured in Vercel env.`);
                   window.alert(
@@ -976,8 +976,8 @@ function AssignForm({
           onChange={(event) => setSendEmail(event.target.checked)}
         />
         <span>
-          <strong>Send email confirmation to employee (CC: admin@scot.lk)</strong>
-          <small>An automated confirmation email containing all item specifications, serial numbers and handover details will be dispatched to the employee and copied to admin@scot.lk.</small>
+          <strong>Send email confirmation to employee (CC: admin@scot.lk, it@scot.lk, hr@scot.lk)</strong>
+          <small>An automated confirmation email containing all item specifications, serial numbers and handover details will be dispatched to the employee and copied to admin@scot.lk, it@scot.lk, and hr@scot.lk.</small>
         </span>
       </label>
 
@@ -1113,11 +1113,11 @@ function ReturnForm({
           onChange={(event) => setSendEmail(event.target.checked)}
         />
         <span>
-          <strong>Send return confirmation email to employee (CC: admin@scot.lk)</strong>
+          <strong>Send return confirmation email to employee (CC: admin@scot.lk, it@scot.lk, hr@scot.lk)</strong>
           <small>
             {clearance
-              ? "An official resignation clearance & return receipt will be dispatched and copied to admin@scot.lk."
-              : "An automated return receipt with custody discharge details will be dispatched and copied to admin@scot.lk."}
+              ? "An official resignation clearance & return receipt will be dispatched and copied to admin@scot.lk, it@scot.lk, and hr@scot.lk."
+              : "An automated return receipt with custody discharge details will be dispatched and copied to admin@scot.lk, it@scot.lk, and hr@scot.lk."}
           </small>
         </span>
       </label>
