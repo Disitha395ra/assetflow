@@ -303,11 +303,12 @@ export default function Home() {
     return { employees: employeeIds.size, assets: assetIds.size, movements: movementIds.size, requirements: requestIds.size };
   }
 
-  async function exportWorkbook() {
+  async function exportWorkbook(exportAssets?: Asset[] | any) {
+    const listToExport = Array.isArray(exportAssets) ? exportAssets : assets;
     const XLSX = await import("xlsx");
     const { strFromU8, strToU8, unzipSync, zipSync } = await import("fflate");
     const workbook = XLSX.utils.book_new();
-    const assetRows = assets.map((asset) => ({
+    const assetRows = listToExport.map((asset) => ({
       Image: furnitureImageForAsset(asset) ? `${furnitureImageForAsset(asset)?.label} · ${furnitureImageForAsset(asset)?.model}` : "",
       "Asset Code": asset.code,
       Category: asset.category,
@@ -335,11 +336,11 @@ export default function Home() {
     }));
     const assetSheet = XLSX.utils.json_to_sheet(assetRows);
     assetSheet["!cols"] = [{ wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 16 }, { wch: 18 }];
-    assetSheet["!rows"] = [{ hpt: 24 }, ...assets.map((asset) => furnitureImageForAsset(asset) ? { hpt: 68 } : { hpt: 20 })];
+    assetSheet["!rows"] = [{ hpt: 24 }, ...listToExport.map((asset) => furnitureImageForAsset(asset) ? { hpt: 68 } : { hpt: 20 })];
     XLSX.utils.book_append_sheet(workbook, assetSheet, "Current Assets");
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(employeeRows), "Employees");
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(requests), "Requirements");
-    const imageRows = assets.map((asset, index) => ({ index, option: furnitureImageForAsset(asset) })).filter((item): item is { index: number; option: NonNullable<ReturnType<typeof furnitureImageForAsset>> } => Boolean(item.option));
+    const imageRows = listToExport.map((asset, index) => ({ index, option: furnitureImageForAsset(asset) })).filter((item): item is { index: number; option: NonNullable<ReturnType<typeof furnitureImageForAsset>> } => Boolean(item.option));
     if (!imageRows.length) {
       XLSX.writeFile(workbook, `AssetFlow-current-report-${today()}.xlsx`);
       flash("Excel report downloaded");
@@ -474,6 +475,7 @@ export default function Home() {
               employeeMap={employeeMap}
               category={category}
               setCategory={setCategory}
+              departments={departments}
               onAdd={() => setModal("asset")}
               onAsset={setSelectedAsset}
               onExport={exportWorkbook}
@@ -765,20 +767,52 @@ function DepartmentAvailability({ assets, employees, departments, onViewAssets, 
   </section>;
 }
 
-function AssetsView({ assets, employeeMap, category, setCategory, onAdd, onAsset, onExport, onQrBatch }: { assets: Asset[]; employeeMap: Record<string, Employee>; category: string; setCategory: (value: string) => void; onAdd: () => void; onAsset: (asset: Asset) => void; onExport: () => void; onQrBatch: () => void }) {
+function AssetsView({ assets, employeeMap, category, setCategory, departments, onAdd, onAsset, onExport, onQrBatch }: { assets: Asset[]; employeeMap: Record<string, Employee>; category: string; setCategory: (value: string) => void; departments: string[]; onAdd: () => void; onAsset: (asset: Asset) => void; onExport: (filtered: Asset[]) => void; onQrBatch: () => void }) {
+  const [typeFilter, setTypeFilter] = useState("All");
+  const [departmentFilter, setDepartmentFilter] = useState("All");
+
+  const filtered = assets.filter((asset) => {
+    if (typeFilter !== "All" && asset.type !== typeFilter) return false;
+    if (departmentFilter !== "All") {
+      const dep = asset.employeeId ? employeeMap[asset.employeeId]?.department : (asset.custodianDepartment || asset.location);
+      if (dep !== departmentFilter) return false;
+    }
+    return true;
+  });
+
   return (
     <>
       <PageHead eyebrow="INVENTORY" title="Assets" description="Track every IT and non-IT item, its condition, owner and complete history.">
         <button className="button button-secondary" onClick={onQrBatch}><QrCode size={17} />Print QR labels</button>
-        <button className="button button-secondary" onClick={onExport}><Download size={17} />Export</button>
+        <button className="button button-secondary" onClick={() => onExport(filtered)}><Download size={17} />Export</button>
         <button className="button button-primary" onClick={onAdd}><Plus size={17} />Add asset</button>
       </PageHead>
       <div className="filter-tabs">
-        {["All", "IT Asset", "Non-IT Asset"].map((item) => <button className={category === item ? "active" : ""} key={item} onClick={() => setCategory(item)}>{item}<span>{item === "All" ? assets.length : assets.filter((asset) => asset.category === item).length}</span></button>)}
+        {["All", "IT Asset", "Non-IT Asset"].map((item) => <button className={category === item ? "active" : ""} key={item} onClick={() => { setCategory(item); setTypeFilter("All"); }}>{item}<span>{item === "All" ? assets.length : assets.filter((asset) => asset.category === item).length}</span></button>)}
+        
+        <select 
+          className="select-filter"
+          style={{ marginLeft: "auto", border: "1px solid var(--border)", padding: "4px 8px", borderRadius: "6px", backgroundColor: "var(--background)", color: "var(--text)" }}
+          value={typeFilter} 
+          onChange={(e) => setTypeFilter(e.target.value)}
+        >
+          <option value="All">All Types</option>
+          {Array.from(new Set(assets.map(a => a.type))).sort().map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        
+        <select 
+          className="select-filter"
+          style={{ marginLeft: "8px", border: "1px solid var(--border)", padding: "4px 8px", borderRadius: "6px", backgroundColor: "var(--background)", color: "var(--text)" }}
+          value={departmentFilter} 
+          onChange={(e) => setDepartmentFilter(e.target.value)}
+        >
+          <option value="All">All Departments</option>
+          {departments.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
       </div>
       <section className="panel table-panel">
-        <div className="table-toolbar"><div><strong>Asset register</strong><small>{assets.length} matching records</small></div><div className="legend"><span><i className="dot green" />Available</span><span><i className="dot blue" />Assigned</span><span><i className="dot orange" />Repair</span></div></div>
-        <AssetTable assets={assets} employeeMap={employeeMap} onAsset={onAsset} />
+        <div className="table-toolbar"><div><strong>Asset register</strong><small>{filtered.length} matching records</small></div><div className="legend"><span><i className="dot green" />Available</span><span><i className="dot blue" />Assigned</span><span><i className="dot orange" />Repair</span></div></div>
+        <AssetTable assets={filtered} employeeMap={employeeMap} onAsset={onAsset} />
       </section>
     </>
   );
