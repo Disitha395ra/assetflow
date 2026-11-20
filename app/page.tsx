@@ -781,24 +781,14 @@ export default function Home() {
               employeeMap={employeeMap}
               assetMap={assetMap}
               onView={setView}
-              onOpenAssetType={(type) => {
-                setCategory("IT Asset");
-                setAssetTypeFilter(type);
-                setView("Assets");
-              }}
               onOpenPrinters={(tab) => {
                 setPrintersSubTab(tab);
                 setView("Printers & Toners");
               }}
-              onAddAsset={(defaultType) => {
+              onAddAsset={() => {
                 setEditingAsset(null);
-                setPresetAssetType(defaultType);
+                setPresetAssetType(undefined);
                 setModal("asset");
-              }}
-              onAddToner={() => {
-                setEditingToner(null);
-                setPresetTonerModel(null);
-                setModal("toner");
               }}
               onAssign={() => setModal("assign")}
               onReturn={() => setModal("return")}
@@ -1186,10 +1176,8 @@ function Dashboard({
   employeeMap,
   assetMap,
   onView,
-  onOpenAssetType,
   onOpenPrinters,
   onAddAsset,
-  onAddToner,
   onAssign,
   onReturn,
   onRequest,
@@ -1205,10 +1193,8 @@ function Dashboard({
   employeeMap: Record<string, Employee>;
   assetMap: Record<string, Asset>;
   onView: (view: View) => void;
-  onOpenAssetType: (type: string) => void;
   onOpenPrinters: (tab: "Printers" | "Toner Stock") => void;
-  onAddAsset: (defaultType?: string) => void;
-  onAddToner: () => void;
+  onAddAsset: () => void;
   onAssign: () => void;
   onReturn: () => void;
   onRequest: () => void;
@@ -1218,77 +1204,12 @@ function Dashboard({
   const available = assets.filter((asset) => effectiveAssetStatus(asset) === "Available").length;
   const repairCount = assets.filter((asset) => effectiveAssetStatus(asset) === "In repair").length;
   const lowToners = toners.filter((toner) => toner.quantity <= toner.minStock);
-  const totalTonerUnits = toners.reduce((sum, item) => sum + item.quantity, 0);
-
-  const laptops = assets.filter((a) => a.type === "Laptop");
-  const staffMonitors = assets.filter((a) => a.type === "Monitor");
-  const locationMonitors = assets.filter((a) => a.type === "Classroom / Location Monitor");
-  const chromecasts = assets.filter((a) => a.type === "Google Chromecast");
-  const printers = assets.filter((a) => a.type === "Printer");
-  const locationAllocatedIt = assets.filter((a) => isLocationOnlyAssetType(a.type));
-
-  const assetHighlights = [
-    {
-      key: "Laptop",
-      label: "Staff Laptops",
-      icon: Laptop,
-      tone: "violet",
-      total: laptops.length,
-      sub: `${laptops.filter((a) => a.status === "Assigned").length} assigned · ${laptops.filter((a) => a.status === "Available").length} stock`,
-      click: () => onOpenAssetType("Laptop"),
-    },
-    {
-      key: "Monitor",
-      label: "Staff Monitors",
-      icon: Monitor,
-      tone: "blue",
-      total: staffMonitors.length,
-      sub: `${staffMonitors.filter((a) => a.status === "Assigned").length} assigned · ${staffMonitors.filter((a) => a.status === "Available").length} stock`,
-      click: () => onOpenAssetType("Monitor"),
-    },
-    {
-      key: "Classroom / Location Monitor",
-      label: "Classroom Monitors",
-      icon: MapPin,
-      tone: "green",
-      total: locationMonitors.length,
-      sub: `${locationMonitors.filter((a) => a.location && a.location !== "Central Stock").length} in rooms · ${locationMonitors.filter((a) => !a.location || a.location === "Central Stock").length} stock`,
-      click: () => onOpenAssetType("Classroom / Location Monitor"),
-    },
-    {
-      key: "Google Chromecast",
-      label: "Google Chromecasts",
-      icon: Cast,
-      tone: "pink",
-      total: chromecasts.length,
-      sub: `${chromecasts.filter((a) => a.location && a.location !== "Central Stock").length} in rooms · ${chromecasts.filter((a) => !a.location || a.location === "Central Stock").length} stock`,
-      click: () => onOpenAssetType("Google Chromecast"),
-    },
-    {
-      key: "Printer",
-      label: "Printers",
-      icon: Printer,
-      tone: "slate",
-      total: printers.length,
-      sub: `${printers.filter((a) => a.allocationType === "department").length} dept · ${printers.filter((a) => Boolean(a.employeeId)).length} person`,
-      click: () => onOpenPrinters("Printers"),
-    },
-    {
-      key: "Toner Stock",
-      label: "Toner Stock",
-      icon: Droplets,
-      tone: lowToners.length > 0 ? "orange" : "green",
-      total: totalTonerUnits,
-      sub: `${toners.length} SKU${toners.length === 1 ? "" : "s"}${lowToners.length > 0 ? ` · ${lowToners.length} low` : " · healthy"}`,
-      click: () => onOpenPrinters("Toner Stock"),
-    },
-  ];
 
   return (
     <>
-      <PageHead eyebrow={new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).toUpperCase()} title="Welcome to AssetFlow" description="Your live company asset register is ready. Track laptops, monitors, Chromecasts, printers, toner stock and departments.">
+      <PageHead eyebrow={new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).toUpperCase()} title="Welcome to AssetFlow" description="Your live company asset register is ready. Add employees and assets to begin.">
         <button className="button button-secondary" onClick={onAssign}><ArrowLeftRight size={17} />Assign assets</button>
-        <button className="button button-primary" onClick={() => onAddAsset()}><Plus size={17} />Add asset</button>
+        <button className="button button-primary" onClick={onAddAsset}><Plus size={17} />Add asset</button>
       </PageHead>
       <div className="metric-grid">
         <Metric icon={Package} label="Total assets" value={assets.length.toString()} change="Live asset register" tone="violet" />
@@ -1308,100 +1229,16 @@ function Dashboard({
           <button className="button button-secondary button-sm" onClick={() => onOpenPrinters("Toner Stock")}><Droplets size={14} />Manage toner stock →</button>
         </div>
       )}
-
-      <section className="panel dashboard-assets-overview">
-        <div className="dashboard-assets-overview-head">
-          <div>
-            <span className="section-kicker">IT ASSETS, LOCATIONS &amp; CONSUMABLES</span>
-            <h2>Assets &amp; Toner Stock Overview</h2>
-            <p>Quick breakdown of laptops, staff &amp; classroom monitors, Google Chromecasts, printers, and toner inventory.</p>
-          </div>
-          <div className="page-actions">
-            <button className="button button-secondary button-sm" onClick={onAddToner}><Droplets size={14} />Add toner</button>
-            <button className="button button-secondary button-sm" onClick={() => onAddAsset("Printer")}><Printer size={14} />Add printer</button>
-          </div>
-        </div>
-        <div className="asset-highlight-grid">
-          {assetHighlights.map(({ key, label, icon: Icon, tone, total, sub, click }) => (
-            <button type="button" className="asset-highlight-card" key={key} onClick={click}>
-              <span className={`report-icon ${tone}`}><Icon size={19} /></span>
-              <div>
-                <strong>{label}</strong>
-                <small>{sub}</small>
-              </div>
-              <b>{total}</b>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <div className="dashboard-grid">
-        <section className="panel">
-          <PanelHead title="Printers & Toner Stock" subtitle="Model-based toner stock levels and printer status" action="Manage printers & toners" onClick={() => onOpenPrinters("Toner Stock")} />
-          <div className="dashboard-mini-list">
-            {toners.length === 0 && printers.length === 0 ? (
-              <div className="empty-panel">
-                <Printer size={20} />
-                <strong>No printers or toners added yet</strong>
-                <span>Add a printer and link compatible toner stock by printer model.</span>
-              </div>
-            ) : toners.length === 0 ? (
-              <div className="empty-panel">
-                <Droplets size={20} />
-                <strong>{printers.length} printer{printers.length === 1 ? "" : "s"} registered — no toner stock yet</strong>
-                <span>Add toner SKUs to track stock counts and low-stock alerts.</span>
-              </div>
-            ) : (
-              toners.slice(0, 5).map((toner) => {
-                const st = tonerStockStatus(toner);
-                return (
-                  <div className="dashboard-mini-row" key={toner.id} onClick={() => onOpenPrinters("Toner Stock")}>
-                    <span className="dashboard-mini-icon violet"><Droplets size={15} /></span>
-                    <div>
-                      <strong>{toner.tonerModel} ({toner.color})</strong>
-                      <small>{toner.printerBrand ? `${toner.printerBrand} · ` : ""}{toner.printerModel} · {toner.storageLocation || "Central IT Store"}</small>
-                    </div>
-                    <div className="dashboard-mini-right">
-                      <strong>{toner.quantity} pcs</strong>
-                      <span className={statusClass(st)}>{st}</span>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </section>
-
-        <section className="panel">
-          <PanelHead title="Classroom & Location IT" subtitle="Location-allocated Monitors & Google Chromecasts" action="View all" onClick={() => onOpenAssetType("Classroom / Location Monitor")} />
-          <div className="dashboard-mini-list">
-            {locationAllocatedIt.length === 0 ? (
-              <div className="empty-panel">
-                <MapPin size={20} />
-                <strong>No classroom monitors or Chromecasts yet</strong>
-                <span>Allocate displays and Chromecasts directly to Building 1 &amp; Building 2 rooms.</span>
-              </div>
-            ) : (
-              locationAllocatedIt.slice(0, 5).map((item) => (
-                <div className="dashboard-mini-row" key={item.id} onClick={() => onAsset(item)}>
-                  <span className={item.type === "Google Chromecast" ? "dashboard-mini-icon pink" : "dashboard-mini-icon green"}>
-                    {item.type === "Google Chromecast" ? <Cast size={15} /> : <Monitor size={15} />}
-                  </span>
-                  <div>
-                    <strong>{item.name}</strong>
-                    <small>{item.location || "Central Stock"} · {item.type}</small>
-                  </div>
-                  <span className={statusClass(item.condition === "Repair" && item.status !== "Retired" ? "In repair" : item.status)}>
-                    {item.condition === "Repair" && item.status !== "Retired" ? "In repair" : item.status}
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
-        </section>
-      </div>
-
-      <DepartmentAvailability assets={assets} employees={employees} departments={departments} locations={locations} onViewAssets={() => onView("Assets")} onAsset={onAsset} />
+      <DepartmentAvailability
+        assets={assets}
+        employees={employees}
+        departments={departments}
+        locations={locations}
+        toners={toners}
+        onViewAssets={() => onView("Assets")}
+        onOpenToners={() => onOpenPrinters("Toner Stock")}
+        onAsset={onAsset}
+      />
       <div className="dashboard-grid">
         <section className="panel activity-panel">
           <PanelHead title="Recent activity" subtitle="Latest asset movements across the company" action="View all" onClick={() => onView("Movements")} />
@@ -1443,7 +1280,25 @@ function Dashboard({
   );
 }
 
-function DepartmentAvailability({ assets, employees, departments, locations, onViewAssets, onAsset }: { assets: Asset[]; employees: Employee[]; departments: string[]; locations: string[]; onViewAssets: () => void; onAsset: (asset: Asset) => void }) {
+function DepartmentAvailability({
+  assets,
+  employees,
+  departments,
+  locations,
+  toners,
+  onViewAssets,
+  onOpenToners,
+  onAsset,
+}: {
+  assets: Asset[];
+  employees: Employee[];
+  departments: string[];
+  locations: string[];
+  toners: TonerStock[];
+  onViewAssets: () => void;
+  onOpenToners: () => void;
+  onAsset: (asset: Asset) => void;
+}) {
   const [selectedDepartment, setSelectedDepartment] = useState("All departments");
   const [selectedType, setSelectedType] = useState("");
   const departmentAssets = assets.filter((asset) => {
@@ -1454,16 +1309,34 @@ function DepartmentAvailability({ assets, employees, departments, locations, onV
   const activeEmployees = employees.filter((employee) => employee.status === "Active" && (selectedDepartment === "All departments" || employee.department === selectedDepartment));
   const availableAssets = departmentAssets.filter((asset) => effectiveAssetStatus(asset) === "Available");
   const assignedAssets = departmentAssets.filter((asset) => effectiveAssetStatus(asset) === "Assigned");
+
+  const baseSummary: Record<string, { total: number; available: number }> =
+    selectedDepartment === "All departments" || selectedDepartment === "Central Stock"
+      ? {
+          "Classroom / Location Monitor": { total: 0, available: 0 },
+          "Google Chromecast": { total: 0, available: 0 },
+          Printer: { total: 0, available: 0 },
+        }
+      : {};
+
   const typeSummary = Object.entries(departmentAssets.reduce<Record<string, { total: number; available: number }>>((summary, asset) => {
     const current = summary[asset.type] ?? { total: 0, available: 0 };
     summary[asset.type] = { total: current.total + 1, available: current.available + (effectiveAssetStatus(asset) === "Available" ? 1 : 0) };
     return summary;
-  }, {})).sort(([, left], [, right]) => right.total - left.total);
+  }, baseSummary)).sort(([typeLeft, left], [typeRight, right]) => right.total - left.total || typeLeft.localeCompare(typeRight));
+
+  const departmentPrinters = departmentAssets.filter((asset) => isPrinterAssetType(asset.type));
+  const relevantToners =
+    selectedDepartment === "All departments" || selectedDepartment === "Central Stock"
+      ? toners
+      : toners.filter((toner) => departmentPrinters.some((printer) => tonerMatchesPrinter(toner, printer)));
+  const totalTonerUnits = relevantToners.reduce((sum, item) => sum + item.quantity, 0);
+  const showTonerCard = selectedDepartment === "All departments" || selectedDepartment === "Central Stock" || relevantToners.length > 0;
   const selectedAvailableAssets = availableAssets.filter((asset) => asset.type === selectedType);
 
   return <section className="panel department-availability">
     <div className="department-availability-head">
-      <div><span className="section-kicker">DEPARTMENT &amp; LOCATION OVERVIEW</span><h2>Asset availability summary</h2><p>See employee capacity and the current Chair, Table, Monitor, Printer, Chromecast and other asset totals for each department or room.</p></div>
+      <div><span className="section-kicker">DEPARTMENT &amp; LOCATION OVERVIEW</span><h2>Asset availability summary</h2><p>See employee capacity and the current Chair, Table, Monitor, Printer, Chromecast, Toner and other asset totals for each department or room.</p></div>
       <label>Department / Location<select aria-label="Availability department" value={selectedDepartment} onChange={(event) => { setSelectedDepartment(event.target.value); setSelectedType(""); }}><option>All departments</option><option>Central Stock</option><optgroup label="Departments">{departments.map((department) => <option key={department}>{department}</option>)}</optgroup>{groupLocationsByBuilding(locations).map(([building, rooms]) => <optgroup key={building} label={building}>{rooms.map((room) => <option key={room.value} value={room.value}>{room.label}</option>)}</optgroup>)}</select></label>
     </div>
     <div className="department-summary-metrics">
@@ -1472,11 +1345,91 @@ function DepartmentAvailability({ assets, employees, departments, locations, onV
       <div><span><ClipboardCheck size={17} /></span><p>Available stock<strong>{availableAssets.length}</strong></p></div>
       <div><span><ArrowLeftRight size={17} /></span><p>Currently assigned<strong>{assignedAssets.length}</strong></p></div>
     </div>
-    {typeSummary.length ? <div className="asset-type-summary">{typeSummary.map(([type, totals]) => { const previewAsset = departmentAssets.find((asset) => asset.type === type && asset.status === "Available") ?? departmentAssets.find((asset) => asset.type === type); const preview = previewAsset ? furnitureImageForAsset(previewAsset) : undefined; return <button type="button" className={`${selectedType === type ? "active" : ""}${preview ? " has-preview" : ""}`} key={type} aria-expanded={selectedType === type} aria-controls="available-asset-details" onClick={() => setSelectedType((current) => current === type ? "" : type)}>{preview && <img className="asset-type-preview" src={preview.src} alt="" />}<div><strong>{type}</strong><span>{totals.available} available</span></div><b>{totals.total}</b><small>{selectedType === type ? "Hide details" : "View available items"}</small></button>; })}</div> : <div className="department-summary-empty"><Package size={20} /><span>No assets are currently recorded for this department.</span></div>}
-    {selectedType && <div className="available-asset-details" id="available-asset-details">
-      <div className="available-asset-details-head"><div><span>AVAILABLE ASSETS</span><h3>{selectedType} · {selectedDepartment}</h3></div><strong>{selectedAvailableAssets.length} item{selectedAvailableAssets.length === 1 ? "" : "s"}</strong></div>
-      {selectedAvailableAssets.length ? <div className="available-asset-list">{selectedAvailableAssets.map((asset) => { const furniture = furnitureImageForAsset(asset); const keySpecs = getAssetKeySpecChips(asset); return <button type="button" key={asset.id} onClick={() => onAsset(asset)}><span className={furniture ? "available-asset-icon has-image" : "available-asset-icon"}>{furniture ? <img src={furniture.src} alt="" /> : assetTypeIcon(asset.type, 18)}</span><span className="available-asset-main"><strong>{asset.name}</strong><small>{asset.code} · {asset.category}</small></span><span className="available-asset-spec"><strong>{[asset.brand, asset.model].filter(Boolean).join(" · ") || "Brand / model not recorded"}</strong><small>{keySpecs.length ? keySpecs.join(" · ") : (asset.serial || asset.location || "No serial or location")}</small></span><span className={asset.condition.toLowerCase() === "repair" ? "available-asset-condition condition-repair" : "available-asset-condition"}>{asset.condition}</span><ExternalLink size={15} /></button>; })}</div> : <div className="available-asset-empty"><ClipboardCheck size={19} /><div><strong>No available {selectedType.toLowerCase()} items</strong><span>This department has {typeSummary.find(([type]) => type === selectedType)?.[1].total ?? 0} recorded, but all are currently assigned or otherwise unavailable.</span></div></div>}
-    </div>}
+    {(typeSummary.length > 0 || showTonerCard) ? (
+      <div className="asset-type-summary">
+        {typeSummary.map(([type, totals]) => {
+          const previewAsset = departmentAssets.find((asset) => asset.type === type && asset.status === "Available") ?? departmentAssets.find((asset) => asset.type === type);
+          const preview = previewAsset ? furnitureImageForAsset(previewAsset) : undefined;
+          return (
+            <button
+              type="button"
+              className={`${selectedType === type ? "active" : ""}${preview ? " has-preview" : ""}`}
+              key={type}
+              aria-expanded={selectedType === type}
+              aria-controls="available-asset-details"
+              onClick={() => setSelectedType((current) => current === type ? "" : type)}
+            >
+              {preview && <img className="asset-type-preview" src={preview.src} alt="" />}
+              <div><strong>{type}</strong><span>{totals.available} available</span></div>
+              <b>{totals.total}</b>
+              <small>{selectedType === type ? "Hide details" : "View available items"}</small>
+            </button>
+          );
+        })}
+        {showTonerCard && (
+          <button
+            type="button"
+            className={selectedType === "Toner" ? "active" : ""}
+            key="Toner"
+            aria-expanded={selectedType === "Toner"}
+            aria-controls="available-asset-details"
+            onClick={() => setSelectedType((current) => current === "Toner" ? "" : "Toner")}
+          >
+            <div>
+              <strong>Toner</strong>
+              <span>{relevantToners.length} SKU{relevantToners.length === 1 ? "" : "s"} in stock</span>
+            </div>
+            <b>{totalTonerUnits}</b>
+            <small>{selectedType === "Toner" ? "Hide details" : "View toner stock"}</small>
+          </button>
+        )}
+      </div>
+    ) : (
+      <div className="department-summary-empty"><Package size={20} /><span>No assets are currently recorded for this department.</span></div>
+    )}
+    {selectedType === "Toner" ? (
+      <div className="available-asset-details" id="available-asset-details">
+        <div className="available-asset-details-head">
+          <div><span>TONER STOCK</span><h3>Toner · {selectedDepartment}</h3></div>
+          <strong>{totalTonerUnits} unit{totalTonerUnits === 1 ? "" : "s"}</strong>
+        </div>
+        {relevantToners.length ? (
+          <div className="available-asset-list">
+            {relevantToners.map((toner) => {
+              const st = tonerStockStatus(toner);
+              return (
+                <button type="button" key={toner.id} onClick={onOpenToners}>
+                  <span className="available-asset-icon"><Droplets size={18} /></span>
+                  <span className="available-asset-main">
+                    <strong>{toner.tonerModel} ({toner.color})</strong>
+                    <small>{toner.printerBrand ? `${toner.printerBrand} · ` : ""}{toner.printerModel}</small>
+                  </span>
+                  <span className="available-asset-spec">
+                    <strong>{toner.quantity} in stock (min {toner.minStock})</strong>
+                    <small>{toner.storageLocation || "Central IT Store"}</small>
+                  </span>
+                  <span className={st === "In stock" ? "available-asset-condition" : "available-asset-condition condition-repair"}>{st}</span>
+                  <ExternalLink size={15} />
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="available-asset-empty">
+            <Droplets size={19} />
+            <div>
+              <strong>No toner stock recorded yet</strong>
+              <span>Add toner SKUs by printer model in Printers &amp; Toners to track stock here.</span>
+            </div>
+          </div>
+        )}
+      </div>
+    ) : selectedType && (
+      <div className="available-asset-details" id="available-asset-details">
+        <div className="available-asset-details-head"><div><span>AVAILABLE ASSETS</span><h3>{selectedType} · {selectedDepartment}</h3></div><strong>{selectedAvailableAssets.length} item{selectedAvailableAssets.length === 1 ? "" : "s"}</strong></div>
+        {selectedAvailableAssets.length ? <div className="available-asset-list">{selectedAvailableAssets.map((asset) => { const furniture = furnitureImageForAsset(asset); const keySpecs = getAssetKeySpecChips(asset); return <button type="button" key={asset.id} onClick={() => onAsset(asset)}><span className={furniture ? "available-asset-icon has-image" : "available-asset-icon"}>{furniture ? <img src={furniture.src} alt="" /> : assetTypeIcon(asset.type, 18)}</span><span className="available-asset-main"><strong>{asset.name}</strong><small>{asset.code} · {asset.category}</small></span><span className="available-asset-spec"><strong>{[asset.brand, asset.model].filter(Boolean).join(" · ") || "Brand / model not recorded"}</strong><small>{keySpecs.length ? keySpecs.join(" · ") : (asset.serial || asset.location || "No serial or location")}</small></span><span className={asset.condition.toLowerCase() === "repair" ? "available-asset-condition condition-repair" : "available-asset-condition"}>{asset.condition}</span><ExternalLink size={15} /></button>; })}</div> : <div className="available-asset-empty"><ClipboardCheck size={19} /><div><strong>No available {selectedType.toLowerCase()} items</strong><span>This department has {typeSummary.find(([type]) => type === selectedType)?.[1].total ?? 0} recorded, but all are currently assigned or otherwise unavailable.</span></div></div>}
+      </div>
+    )}
     <button className="department-summary-link" onClick={onViewAssets}>Open full asset register →</button>
   </section>;
 }

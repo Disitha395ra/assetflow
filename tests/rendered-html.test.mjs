@@ -294,7 +294,7 @@ test("uses atomic Firestore transactions, multi-token search, orange repair badg
   assert.match(page, /watchRequirementWindow/);
   assert.match(page, /ASSET MOVEMENT HISTORY/);
   assert.match(page, /One classroom \/ location/);
-  assert.match(page, /Assets &amp; Toner Stock Overview/);
+  assert.match(page, /View toner stock/);
   assert.match(css, /\.available-asset-condition\.condition-repair/);
   assert.match(css, /\.document-condition\.condition-repair/);
 });
