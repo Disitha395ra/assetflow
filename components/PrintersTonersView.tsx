@@ -58,7 +58,8 @@ export function PrintersTonersView({
   toners,
   transactions,
   employeeMap,
-  initialSubTab = "Printers",
+  subTab,
+  onSubTabChange,
   onAddPrinter,
   onAsset,
   onAddToner,
@@ -71,7 +72,8 @@ export function PrintersTonersView({
   toners: TonerStock[];
   transactions: TonerTransaction[];
   employeeMap: Record<string, Employee>;
-  initialSubTab?: "Printers" | "Toner Stock";
+  subTab: "Printers" | "Toner Stock";
+  onSubTabChange: (tab: "Printers" | "Toner Stock") => void;
   onAddPrinter: () => void;
   onAsset: (asset: Asset) => void;
   onAddToner: (preset?: { model: string; brand?: string; compatibleToner?: string }) => void;
@@ -80,7 +82,6 @@ export function PrintersTonersView({
   onStockAction: (toner: TonerStock, mode: "Restock" | "Issued", presetPrinterId?: string) => void;
   onExport: () => void;
 }) {
-  const [subTab, setSubTab] = useState<"Printers" | "Toner Stock">(initialSubTab);
   const [printerModelFilter, setPrinterModelFilter] = useState("All");
   const [stockStatusFilter, setStockStatusFilter] = useState<"All" | "In stock" | "Low stock" | "Out of stock">("All");
 
@@ -179,13 +180,13 @@ export function PrintersTonersView({
       <div className="filter-tabs">
         <button
           className={subTab === "Printers" ? "active" : ""}
-          onClick={() => setSubTab("Printers")}
+          onClick={() => onSubTabChange("Printers")}
         >
           Printers<span>{printers.length}</span>
         </button>
         <button
           className={subTab === "Toner Stock" ? "active" : ""}
-          onClick={() => setSubTab("Toner Stock")}
+          onClick={() => onSubTabChange("Toner Stock")}
         >
           Toner stock (Subsection)<span>{toners.length}</span>
         </button>
@@ -227,7 +228,7 @@ export function PrintersTonersView({
               <strong>Printer register</strong>
               <small>Assigned to specific departments or staff, linked directly to compatible toner stock</small>
             </div>
-            <button className="button button-secondary" onClick={() => setSubTab("Toner Stock")}>
+            <button className="button button-secondary" onClick={() => onSubTabChange("Toner Stock")}>
               <Droplets size={15} />View toner stock →
             </button>
           </div>
@@ -603,8 +604,8 @@ export function TonerForm({
           printerBrand: form.printerBrand.trim(),
           tonerModel: form.tonerModel.trim(),
           color: form.color,
-          quantity: Math.max(0, Number(form.quantity) || 0),
-          minStock: Math.max(0, Number(form.minStock) || 0),
+          quantity: Math.floor(Math.max(0, Number(form.quantity) || 0)),
+          minStock: Math.floor(Math.max(0, Number(form.minStock) || 0)),
           storageLocation: form.storageLocation.trim() || "Central IT Store",
           notes: form.notes.trim(),
           updatedAt: new Date().toISOString().slice(0, 10),
@@ -760,7 +761,7 @@ export function TonerStockActionForm({
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const qtyNum = Math.max(1, Number(quantity) || 1);
+  const qtyNum = Math.floor(Math.max(1, Number(quantity) || 1));
   const exceedsStock = mode === "Issued" && qtyNum > toner.quantity;
 
   return (
@@ -952,7 +953,7 @@ export function LocationManager({
         {items.map((loc, index) => {
           const assetCount = assets.filter((asset) => asset.location === loc).length;
           return (
-            <div key={`${loc}-${index}`}>
+            <div key={index}>
               <input
                 aria-label={`Location ${index + 1}`}
                 value={loc}

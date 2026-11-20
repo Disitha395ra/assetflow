@@ -25,6 +25,15 @@ type EmailRequestBody = {
   assets: ReturnedAsset[];
 };
 
+function escapeHtml(value: string | undefined | null) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 export async function POST(req: Request) {
   try {
     const body: EmailRequestBody = await req.json();
@@ -74,20 +83,26 @@ export async function POST(req: Request) {
       .map(
         (asset, index) => `
         <tr style="border-bottom: 1px solid #e2e8f0; background: ${index % 2 === 0 ? "#ffffff" : "#f8fafc"};">
-          <td style="padding: 12px 14px; font-weight: 600; color: #1e293b; font-size: 14px;">${asset.code}</td>
+          <td style="padding: 12px 14px; font-weight: 600; color: #1e293b; font-size: 14px;">${escapeHtml(asset.code)}</td>
           <td style="padding: 12px 14px; color: #0f172a; font-size: 14px;">
-            <strong>${asset.name}</strong>
-            ${asset.brand || asset.model ? `<div style="font-size: 12px; color: #64748b;">${[asset.brand, asset.model].filter(Boolean).join(" · ")}</div>` : ""}
+            <strong>${escapeHtml(asset.name)}</strong>
+            ${asset.brand || asset.model ? `<div style="font-size: 12px; color: #64748b;">${escapeHtml([asset.brand, asset.model].filter(Boolean).join(" · "))}</div>` : ""}
           </td>
-          <td style="padding: 12px 14px; color: #334155; font-size: 13px;">${asset.type} (${asset.category})</td>
-          <td style="padding: 12px 14px; color: #334155; font-size: 13px;">${asset.serial || asset.location || "N/A"}</td>
+          <td style="padding: 12px 14px; color: #334155; font-size: 13px;">${escapeHtml(asset.type)} (${escapeHtml(asset.category)})</td>
+          <td style="padding: 12px 14px; color: #334155; font-size: 13px;">${escapeHtml(asset.serial || asset.location || "N/A")}</td>
           <td style="padding: 12px 14px; color: #334155; font-size: 13px;">
-            <span style="display: inline-block; padding: 2px 8px; border-radius: 9999px; background: #ecfdf5; color: #047857; font-weight: 500; font-size: 12px;">${asset.condition || "Returned"}</span>
+            <span style="display: inline-block; padding: 2px 8px; border-radius: 9999px; background: ${asset.condition?.toLowerCase() === "repair" ? "#fff3e5" : "#ecfdf5"}; color: ${asset.condition?.toLowerCase() === "repair" ? "#c87518" : "#047857"}; font-weight: 500; font-size: 12px;">${escapeHtml(asset.condition || "Returned")}</span>
           </td>
         </tr>
       `
       )
       .join("");
+
+    const safeEmployeeName = escapeHtml(employeeName);
+    const safeDepartment = escapeHtml(employeeDepartment);
+    const safeEmpNo = escapeHtml(employeeEmpNo || "N/A");
+    const safeDate = escapeHtml(returnDate);
+    const safeNote = note ? escapeHtml(note) : "";
 
     const emailSubject = isClearance
       ? `Employee Clearance - Asset Return Confirmation (${assets.length} Item${assets.length > 1 ? "s" : ""})`
@@ -126,9 +141,9 @@ export async function POST(req: Request) {
           <!-- Body Content -->
           <tr>
             <td style="padding: 36px 36px 24px;">
-              <p style="margin: 0 0 16px; font-size: 16px; color: #1e293b;">Dear <strong>${employeeName}</strong>,</p>
+              <p style="margin: 0 0 16px; font-size: 16px; color: #1e293b;">Dear <strong>${safeEmployeeName}</strong>,</p>
               <p style="margin: 0 0 24px; font-size: 14px; line-height: 1.6; color: #475569;">
-                This is an official confirmation from the Asset Management team. The company asset${assets.length > 1 ? "s" : ""} listed below ${assets.length > 1 ? "have" : "has"} been safely received and returned to central inventory on <strong>${returnDate}</strong>${isClearance ? " as part of your employee clearance process" : ""}.
+                This is an official confirmation from the Asset Management team. The company asset${assets.length > 1 ? "s" : ""} listed below ${assets.length > 1 ? "have" : "has"} been safely received and returned to central inventory on <strong>${safeDate}</strong>${isClearance ? " as part of your employee clearance process" : ""}.
               </p>
 
               <!-- Employee Details Panel -->
@@ -136,15 +151,15 @@ export async function POST(req: Request) {
                 <tr>
                   <td width="25%" style="padding: 6px 12px;">
                     <span style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600;">Employee Name</span>
-                    <div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-top: 2px;">${employeeName}</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-top: 2px;">${safeEmployeeName}</div>
                   </td>
                   <td width="25%" style="padding: 6px 12px;">
                     <span style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600;">Employee No</span>
-                    <div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-top: 2px;">${employeeEmpNo || "N/A"}</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-top: 2px;">${safeEmpNo}</div>
                   </td>
                   <td width="25%" style="padding: 6px 12px;">
                     <span style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600;">Department</span>
-                    <div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-top: 2px;">${employeeDepartment}</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-top: 2px;">${safeDepartment}</div>
                   </td>
                   <td width="25%" style="padding: 6px 12px;">
                     <span style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600;">Return Status</span>
@@ -177,11 +192,11 @@ export async function POST(req: Request) {
               </table>
 
               ${
-                note
+                safeNote
                   ? `
                 <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 14px 18px; margin-bottom: 24px;">
                   <strong style="color: #166534; font-size: 13px;">Return Note / Remarks:</strong>
-                  <p style="margin: 4px 0 0; color: #14532d; font-size: 13px;">${note}</p>
+                  <p style="margin: 4px 0 0; color: #14532d; font-size: 13px;">${safeNote}</p>
                 </div>
               `
                   : ""

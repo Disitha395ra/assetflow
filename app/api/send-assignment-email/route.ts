@@ -24,6 +24,15 @@ type EmailRequestBody = {
   assets: AssignedAsset[];
 };
 
+function escapeHtml(value: string | undefined | null) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 export async function POST(req: Request) {
   try {
     const body: EmailRequestBody = await req.json();
@@ -72,20 +81,26 @@ export async function POST(req: Request) {
       .map(
         (asset, index) => `
         <tr style="border-bottom: 1px solid #e2e8f0; background: ${index % 2 === 0 ? "#ffffff" : "#f8fafc"};">
-          <td style="padding: 12px 14px; font-weight: 600; color: #1e293b; font-size: 14px;">${asset.code}</td>
+          <td style="padding: 12px 14px; font-weight: 600; color: #1e293b; font-size: 14px;">${escapeHtml(asset.code)}</td>
           <td style="padding: 12px 14px; color: #0f172a; font-size: 14px;">
-            <strong>${asset.name}</strong>
-            ${asset.brand || asset.model ? `<div style="font-size: 12px; color: #64748b;">${[asset.brand, asset.model].filter(Boolean).join(" · ")}</div>` : ""}
+            <strong>${escapeHtml(asset.name)}</strong>
+            ${asset.brand || asset.model ? `<div style="font-size: 12px; color: #64748b;">${escapeHtml([asset.brand, asset.model].filter(Boolean).join(" · "))}</div>` : ""}
           </td>
-          <td style="padding: 12px 14px; color: #334155; font-size: 13px;">${asset.type} (${asset.category})</td>
-          <td style="padding: 12px 14px; color: #334155; font-size: 13px;">${asset.serial || asset.location || "N/A"}</td>
+          <td style="padding: 12px 14px; color: #334155; font-size: 13px;">${escapeHtml(asset.type)} (${escapeHtml(asset.category)})</td>
+          <td style="padding: 12px 14px; color: #334155; font-size: 13px;">${escapeHtml(asset.serial || asset.location || "N/A")}</td>
           <td style="padding: 12px 14px; color: #334155; font-size: 13px;">
-            <span style="display: inline-block; padding: 2px 8px; border-radius: 9999px; background: #e0f2fe; color: #0369a1; font-weight: 500; font-size: 12px;">${asset.condition || "Good"}</span>
+            <span style="display: inline-block; padding: 2px 8px; border-radius: 9999px; background: ${asset.condition?.toLowerCase() === "repair" ? "#fff3e5" : "#e0f2fe"}; color: ${asset.condition?.toLowerCase() === "repair" ? "#c87518" : "#0369a1"}; font-weight: 500; font-size: 12px;">${escapeHtml(asset.condition || "Good")}</span>
           </td>
         </tr>
       `
       )
       .join("");
+
+    const safeEmployeeName = escapeHtml(employeeName);
+    const safeDepartment = escapeHtml(employeeDepartment);
+    const safeEmpNo = escapeHtml(employeeEmpNo || "N/A");
+    const safeDate = escapeHtml(assignedDate);
+    const safeNote = note ? escapeHtml(note) : "";
 
     const emailSubject = `Asset Allocation Confirmation - ${assets.length} Item${assets.length > 1 ? "s" : ""} Assigned (${assignedDate})`;
 
@@ -118,9 +133,9 @@ export async function POST(req: Request) {
           <!-- Body Content -->
           <tr>
             <td style="padding: 36px 36px 24px;">
-              <p style="margin: 0 0 16px; font-size: 16px; color: #1e293b;">Dear <strong>${employeeName}</strong>,</p>
+              <p style="margin: 0 0 16px; font-size: 16px; color: #1e293b;">Dear <strong>${safeEmployeeName}</strong>,</p>
               <p style="margin: 0 0 24px; font-size: 14px; line-height: 1.6; color: #475569;">
-                This is an official confirmation from the Asset Management team. The company asset${assets.length > 1 ? "s" : ""} listed below ${assets.length > 1 ? "have" : "has"} been assigned to you on <strong>${assignedDate}</strong>.
+                This is an official confirmation from the Asset Management team. The company asset${assets.length > 1 ? "s" : ""} listed below ${assets.length > 1 ? "have" : "has"} been assigned to you on <strong>${safeDate}</strong>.
               </p>
 
               <!-- Employee Details Panel -->
@@ -128,15 +143,15 @@ export async function POST(req: Request) {
                 <tr>
                   <td width="33%" style="padding: 6px 12px;">
                     <span style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600;">Employee Name</span>
-                    <div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-top: 2px;">${employeeName}</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-top: 2px;">${safeEmployeeName}</div>
                   </td>
                   <td width="33%" style="padding: 6px 12px;">
                     <span style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600;">Employee No</span>
-                    <div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-top: 2px;">${employeeEmpNo || "N/A"}</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-top: 2px;">${safeEmpNo}</div>
                   </td>
                   <td width="33%" style="padding: 6px 12px;">
                     <span style="font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: 600;">Department</span>
-                    <div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-top: 2px;">${employeeDepartment}</div>
+                    <div style="font-size: 14px; font-weight: 600; color: #1e293b; margin-top: 2px;">${safeDepartment}</div>
                   </td>
                 </tr>
               </table>
@@ -163,11 +178,11 @@ export async function POST(req: Request) {
               </table>
 
               ${
-                note
+                safeNote
                   ? `
                 <div style="background-color: #fefce8; border: 1px solid #fef08a; border-radius: 8px; padding: 14px 18px; margin-bottom: 24px;">
                   <strong style="color: #854d0e; font-size: 13px;">Allocation Note:</strong>
-                  <p style="margin: 4px 0 0; color: #713f12; font-size: 13px;">${note}</p>
+                  <p style="margin: 4px 0 0; color: #713f12; font-size: 13px;">${safeNote}</p>
                 </div>
               `
                   : ""

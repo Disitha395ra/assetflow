@@ -46,7 +46,7 @@ import {
   X,
 } from "lucide-react";
 import QRCode from "qrcode";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ADMIN_EMAIL,
   DEFAULT_REQUIREMENT_WINDOW,
@@ -182,6 +182,7 @@ export default function Home() {
   const [documentAssetIds, setDocumentAssetIds] = useState<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toast, setToast] = useState("");
+  const toastTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!firebaseReady) return;
@@ -296,7 +297,8 @@ export default function Home() {
 
   function flash(message: string) {
     setToast(message);
-    window.setTimeout(() => setToast(""), 2800);
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(""), 3200);
   }
 
   async function saveToner(toner: TonerStock) {
@@ -395,6 +397,7 @@ export default function Home() {
     const employeeIds = new Set(employees.filter((employee) => employee.department === targetDepartment).map((employee) => employee.id));
     const assetIds = new Set(assets.filter((asset) =>
       asset.custodianDepartment === targetDepartment ||
+      asset.assignedDepartment === targetDepartment ||
       asset.location === targetDepartment ||
       (targetDepartment === "IT Dept" && asset.status === "Available" && !asset.custodianDepartment && !asset.location)
     ).map((asset) => asset.id));
@@ -450,6 +453,7 @@ export default function Home() {
       "No. of P-Cores": asset.specs?.pCores ?? "",
       "No. of E-Cores": asset.specs?.eCores ?? "",
       Condition: asset.condition,
+      "Asset Verified (Yes/No)": asset.verified ? "Yes" : "No",
       Specifications: Object.entries(asset.specs ?? {}).filter(([, value]) => value).map(([key, value]) => `${specLabel(key)}: ${value}`).join("; "),
       Details: asset.details,
     }));
@@ -640,12 +644,12 @@ export default function Home() {
           )}
           {view === "Printers & Toners" && (
             <PrintersTonersView
-              key={printersSubTab}
               printers={printerAssets}
               toners={filteredToners}
               transactions={tonerTransactions}
               employeeMap={employeeMap}
-              initialSubTab={printersSubTab}
+              subTab={printersSubTab}
+              onSubTabChange={setPrintersSubTab}
               onAddPrinter={() => { setEditingAsset(null); setPresetAssetType("Printer"); setModal("asset"); }}
               onAsset={setSelectedAsset}
               onAddToner={(preset) => { setEditingToner(null); setPresetTonerModel(preset ?? null); setModal("toner"); }}
@@ -1031,7 +1035,7 @@ function DepartmentAvailability({ assets, employees, departments, onViewAssets, 
     {typeSummary.length ? <div className="asset-type-summary">{typeSummary.map(([type, totals]) => { const previewAsset = departmentAssets.find((asset) => asset.type === type && asset.status === "Available") ?? departmentAssets.find((asset) => asset.type === type); const preview = previewAsset ? furnitureImageForAsset(previewAsset) : undefined; return <button type="button" className={`${selectedType === type ? "active" : ""}${preview ? " has-preview" : ""}`} key={type} aria-expanded={selectedType === type} aria-controls="available-asset-details" onClick={() => setSelectedType((current) => current === type ? "" : type)}>{preview && <img className="asset-type-preview" src={preview.src} alt="" />}<div><strong>{type}</strong><span>{totals.available} available</span></div><b>{totals.total}</b><small>{selectedType === type ? "Hide details" : "View available items"}</small></button>; })}</div> : <div className="department-summary-empty"><Package size={20} /><span>No assets are currently recorded for this department.</span></div>}
     {selectedType && <div className="available-asset-details" id="available-asset-details">
       <div className="available-asset-details-head"><div><span>AVAILABLE ASSETS</span><h3>{selectedType} · {selectedDepartment}</h3></div><strong>{selectedAvailableAssets.length} item{selectedAvailableAssets.length === 1 ? "" : "s"}</strong></div>
-      {selectedAvailableAssets.length ? <div className="available-asset-list">{selectedAvailableAssets.map((asset) => { const furniture = furnitureImageForAsset(asset); const keySpecs = getAssetKeySpecChips(asset); return <button type="button" key={asset.id} onClick={() => onAsset(asset)}><span className={furniture ? "available-asset-icon has-image" : "available-asset-icon"}>{furniture ? <img src={furniture.src} alt="" /> : assetTypeIcon(asset.type, 18)}</span><span className="available-asset-main"><strong>{asset.name}</strong><small>{asset.code} · {asset.category}</small></span><span className="available-asset-spec"><strong>{[asset.brand, asset.model].filter(Boolean).join(" · ") || "Brand / model not recorded"}</strong><small>{keySpecs.length ? keySpecs.join(" · ") : (asset.serial || asset.location || "No serial or location")}</small></span><span className="available-asset-condition">{asset.condition}</span><ExternalLink size={15} /></button>; })}</div> : <div className="available-asset-empty"><ClipboardCheck size={19} /><div><strong>No available {selectedType.toLowerCase()} items</strong><span>This department has {typeSummary.find(([type]) => type === selectedType)?.[1].total ?? 0} recorded, but all are currently assigned or otherwise unavailable.</span></div></div>}
+      {selectedAvailableAssets.length ? <div className="available-asset-list">{selectedAvailableAssets.map((asset) => { const furniture = furnitureImageForAsset(asset); const keySpecs = getAssetKeySpecChips(asset); return <button type="button" key={asset.id} onClick={() => onAsset(asset)}><span className={furniture ? "available-asset-icon has-image" : "available-asset-icon"}>{furniture ? <img src={furniture.src} alt="" /> : assetTypeIcon(asset.type, 18)}</span><span className="available-asset-main"><strong>{asset.name}</strong><small>{asset.code} · {asset.category}</small></span><span className="available-asset-spec"><strong>{[asset.brand, asset.model].filter(Boolean).join(" · ") || "Brand / model not recorded"}</strong><small>{keySpecs.length ? keySpecs.join(" · ") : (asset.serial || asset.location || "No serial or location")}</small></span><span className={asset.condition.toLowerCase() === "repair" ? "available-asset-condition condition-repair" : "available-asset-condition"}>{asset.condition}</span><ExternalLink size={15} /></button>; })}</div> : <div className="available-asset-empty"><ClipboardCheck size={19} /><div><strong>No available {selectedType.toLowerCase()} items</strong><span>This department has {typeSummary.find(([type]) => type === selectedType)?.[1].total ?? 0} recorded, but all are currently assigned or otherwise unavailable.</span></div></div>}
     </div>}
     <button className="department-summary-link" onClick={onViewAssets}>Open full asset register →</button>
   </section>;
@@ -1547,7 +1551,11 @@ function AssetTable({ assets, employeeMap, onAsset, compact = false }: { assets:
                     <span className="muted">{asset.category === "Non-IT Asset" ? asset.location || "—" : "—"}</span>
                   )}
                 </td>
-                <td><span className={statusClass(asset.status)}>{asset.status}</span></td>
+                <td>
+                  <span className={statusClass(asset.condition === "Repair" && asset.status !== "Retired" ? "In repair" : asset.status)}>
+                    {asset.condition === "Repair" && asset.status !== "Retired" ? "In repair" : asset.status}
+                  </span>
+                </td>
                 <td><button className="row-action" aria-label={`View ${asset.name}`}>→</button></td>
               </tr>
             );
@@ -1614,7 +1622,12 @@ function AssetDrawer({
           </div>
           <div className={furniture ? "asset-hero furniture-hero" : "asset-hero"}>
             {furniture ? <img src={furniture.src} alt={`${furniture.label} ${furniture.model}`} /> : <span className="asset-big-icon">{assetTypeIcon(asset.type, 34)}</span>}
-            <div><span className={statusClass(asset.status)}>{asset.status}</span><p>{asset.brand} · {asset.model}</p></div>
+            <div>
+              <span className={statusClass(asset.condition === "Repair" && asset.status !== "Retired" ? "In repair" : asset.status)}>
+                {asset.condition === "Repair" && asset.status !== "Retired" ? "In repair" : asset.status}
+              </span>
+              <p>{asset.brand} · {asset.model}</p>
+            </div>
           </div>
           <section className="detail-section">
             <h3>Asset details</h3>
@@ -1858,6 +1871,17 @@ function AssetForm({
           if (!nextEmployeeId && nextStatus === "Assigned") {
             nextStatus = "Available";
           }
+        }
+
+        if (form.condition === "Repair") {
+          nextStatus = "In repair";
+        } else if (nextStatus === "In repair") {
+          const isAllocated = Boolean(
+            nextEmployeeId ||
+            nextAllocationType === "department" ||
+            nextAllocationType === "location",
+          );
+          nextStatus = isAllocated ? "Assigned" : "Available";
         }
 
         const typeCodePrefix =
@@ -2294,6 +2318,12 @@ function AssignForm({
         </p>
       )}
       <div className="check-list">
+        {available.length === 0 && (
+          <div className="empty-panel" style={{ minHeight: "80px" }}>
+            <strong>No available assets ready for employee assignment</strong>
+            <span>Add available IT/Non-IT items first, or edit location-allocated items directly.</span>
+          </div>
+        )}
         {available.map((asset) => {
           const furniture = furnitureImageForAsset(asset);
           return (
@@ -2328,7 +2358,7 @@ function AssignForm({
             ? "Assigning items…"
             : `Assign ${selected.length || ""} item${selected.length === 1 ? "" : "s"}${sendEmail ? " & Send Confirmation" : ""}`
         }
-        disabled={!selected.length || submitting}
+        disabled={!selected.length || !employeeId || submitting}
       />
     </form>
   );
@@ -2435,6 +2465,12 @@ function ReturnForm({
 
       <p className="field-heading">Choose returned items ({selected.length} selected)</p>
       <div className="check-list">
+        {owned.length === 0 && (
+          <div className="empty-panel" style={{ minHeight: "80px" }}>
+            <strong>No assigned assets found for this employee</strong>
+            <span>Select another employee who currently holds company assets.</span>
+          </div>
+        )}
         {owned.map((asset) => (
           <label key={asset.id}>
             <input
@@ -2475,7 +2511,7 @@ function ReturnForm({
               ? `Return ${selected.length || ""} & Prepare Clearance${sendEmail ? " & Send Email" : ""}`
               : `Record Return (${selected.length || ""})${sendEmail ? " & Send Confirmation" : ""}`
         }
-        disabled={!selected.length || submitting}
+        disabled={!selected.length || !employeeId || submitting}
       />
     </form>
   );
@@ -2502,7 +2538,7 @@ function DepartmentManager({ departments, employees, onSave, onPurge }: { depart
   const [purging, setPurging] = useState("");
   return <form onSubmit={(event) => { event.preventDefault(); onSave(items.map((item) => item.trim()).filter(Boolean)); }}>
     <div className="department-add"><label>New department<input value={newDepartment} placeholder="e.g. Quality Assurance Dept" onChange={(event) => setNewDepartment(event.target.value)} /></label><button className="button button-secondary" type="button" disabled={!newDepartment.trim()} onClick={() => { const next = newDepartment.trim(); if (next && !items.some((item) => item.toLowerCase() === next.toLowerCase())) setItems([...items, next]); setNewDepartment(""); }}><Plus size={16} />Add department</button></div>
-    <div className="department-editor">{items.map((department, index) => { const employeeCount = employees.filter((employee) => employee.department === department).length; return <div key={`${department}-${index}`}><input aria-label={`Department ${index + 1}`} value={department} onChange={(event) => setItems((rows) => rows.map((row, rowIndex) => rowIndex === index ? event.target.value : row))} /><span>{employeeCount} employee{employeeCount === 1 ? "" : "s"}</span>{department === "IT Dept" ? <button className="department-purge" type="button" disabled={Boolean(purging)} onClick={async () => { if (!window.confirm("Permanently delete IT Dept and every related employee, asset, movement, requirement, QR and history record? This cannot be undone.")) return; setPurging(department); try { await onPurge(department); } finally { setPurging(""); } }}>{purging ? "Deleting…" : "Delete all data"}</button> : <button type="button" disabled={employeeCount > 0 || items.length === 1} onClick={() => setItems((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}>Remove</button>}</div>; })}</div>
+    <div className="department-editor">{items.map((department, index) => { const employeeCount = employees.filter((employee) => employee.department === department).length; return <div key={index}><input aria-label={`Department ${index + 1}`} value={department} onChange={(event) => setItems((rows) => rows.map((row, rowIndex) => rowIndex === index ? event.target.value : row))} /><span>{employeeCount} employee{employeeCount === 1 ? "" : "s"}</span>{department === "IT Dept" ? <button className="department-purge" type="button" disabled={Boolean(purging)} onClick={async () => { if (!window.confirm("Permanently delete IT Dept and every related employee, asset, movement, requirement, QR and history record? This cannot be undone.")) return; setPurging(department); try { await onPurge(department); } finally { setPurging(""); } }}>{purging ? "Deleting…" : "Delete all data"}</button> : <button type="button" disabled={employeeCount > 0 || items.length === 1} onClick={() => setItems((rows) => rows.filter((_, rowIndex) => rowIndex !== index))}>Remove</button>}</div>; })}</div>
     <p className="department-note">Departments with employees cannot normally be removed until those employees are moved. The retired IT Dept has a one-time permanent purge action for its related records.</p>
     <FormActions text="Save departments" disabled={!items.length || items.some((item) => !item.trim())} />
   </form>;
@@ -2522,7 +2558,7 @@ function PrintableDocument({ type, employees, assets, initialEmployeeId = "", in
   const owned = initialAssetIds.length ? contextualAssets : assets.filter((asset) => asset.employeeId === employeeId);
   const included = owned.filter((asset) => selected.includes(asset.id));
   const returnDocument = type.includes("Return") || type.includes("Clearance");
-  return <div><div className="document-controls"><label>Employee<select value={employeeId} disabled={Boolean(initialEmployeeId)} onChange={(event) => { const nextId = event.target.value; setEmployeeId(nextId); setSelected(assets.filter((asset) => asset.employeeId === nextId).map((asset) => asset.id)); }}>{employees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><button className="button button-primary" disabled={!employee || !included.length} onClick={() => window.print()}><Printer size={17} />Print / Save PDF</button></div><div className="document-item-picker"><div><strong>Select items for this document</strong><span>{selected.length} of {owned.length} included</span></div><div>{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} />{asset.name}<small>{asset.code}</small></label>)}</div></div><article className="print-document"><div className="document-accent" /><header><div><strong>ASSETFLOW</strong><span>Company Asset Management · Official Record</span></div><p>{type}</p></header><div className="document-title"><span>{type.toUpperCase()}</span><h1>{employee?.name || "Select an employee"}</h1><p>{employee ? `${employee.empNo} · ${employee.designation} · ${employee.department}` : "No employee selected"}</p></div><div className="document-meta"><span>Document date<strong>{new Date().toLocaleDateString("en-GB")}</strong></span><span>Reference<strong>AF-{employee?.empNo || "UNASSIGNED"}-{type.replaceAll(" ", "-").toUpperCase()}</strong></span><span>Items covered<strong>{included.length}</strong></span></div><table><thead><tr><th>#</th><th>Asset / item</th><th>Asset code</th><th>Serial / location</th><th>Condition</th></tr></thead><tbody>{included.map((asset, index) => { const chips = getAssetKeySpecChips(asset); return <tr key={asset.id}><td>{String(index + 1).padStart(2, "0")}</td><td><strong>{asset.name}</strong><small>{[chips.join(" · "), asset.details].filter(Boolean).join(" — ")}</small></td><td>{asset.code}</td><td>{asset.serial || asset.location || "—"}</td><td><span className="document-condition">{asset.condition}</span></td></tr>; })}</tbody></table><p className="document-statement">{returnDocument ? "The assets listed above have been returned to the company and verified by the responsible department. Any exception or damage must be recorded before final employee clearance is approved." : "I acknowledge receipt and responsibility for the company assets listed above. I agree to use them only for authorised company work, take reasonable care of them, and return them in good condition when requested."}</p><div className="signature-grid"><span>Employee signature<small>Name, signature & date</small></span><span>Issued / received by<small>Asset Administration</small></span><span>Authorised by<small>Department Head</small></span></div><footer><strong>AssetFlow verified document</strong><span>Generated from the live company asset register · {new Date().toLocaleString("en-GB")}</span></footer></article></div>;
+  return <div><div className="document-controls"><label>Employee<select value={employeeId} disabled={Boolean(initialEmployeeId)} onChange={(event) => { const nextId = event.target.value; setEmployeeId(nextId); setSelected(assets.filter((asset) => asset.employeeId === nextId).map((asset) => asset.id)); }}>{employees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><button className="button button-primary" disabled={!employee || !included.length} onClick={() => window.print()}><Printer size={17} />Print / Save PDF</button></div><div className="document-item-picker"><div><strong>Select items for this document</strong><span>{selected.length} of {owned.length} included</span></div><div>{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} />{asset.name}<small>{asset.code}</small></label>)}</div></div><article className="print-document"><div className="document-accent" /><header><div><strong>ASSETFLOW</strong><span>Company Asset Management · Official Record</span></div><p>{type}</p></header><div className="document-title"><span>{type.toUpperCase()}</span><h1>{employee?.name || "Select an employee"}</h1><p>{employee ? `${employee.empNo} · ${employee.designation} · ${employee.department}` : "No employee selected"}</p></div><div className="document-meta"><span>Document date<strong>{new Date().toLocaleDateString("en-GB")}</strong></span><span>Reference<strong>AF-{employee?.empNo || "UNASSIGNED"}-{type.replaceAll(" ", "-").toUpperCase()}</strong></span><span>Items covered<strong>{included.length}</strong></span></div><table><thead><tr><th>#</th><th>Asset / item</th><th>Asset code</th><th>Serial / location</th><th>Condition</th></tr></thead><tbody>{included.map((asset, index) => { const chips = getAssetKeySpecChips(asset); return <tr key={asset.id}><td>{String(index + 1).padStart(2, "0")}</td><td><strong>{asset.name}</strong><small>{[chips.join(" · "), asset.details].filter(Boolean).join(" — ")}</small></td><td>{asset.code}</td><td>{asset.serial || asset.location || "—"}</td><td><span className={asset.condition.toLowerCase() === "repair" ? "document-condition condition-repair" : "document-condition"}>{asset.condition}</span></td></tr>; })}</tbody></table><p className="document-statement">{returnDocument ? "The assets listed above have been returned to the company and verified by the responsible department. Any exception or damage must be recorded before final employee clearance is approved." : "I acknowledge receipt and responsibility for the company assets listed above. I agree to use them only for authorised company work, take reasonable care of them, and return them in good condition when requested."}</p><div className="signature-grid"><span>Employee signature<small>Name, signature & date</small></span><span>Issued / received by<small>Asset Administration</small></span><span>Authorised by<small>Department Head</small></span></div><footer><strong>AssetFlow verified document</strong><span>Generated from the live company asset register · {new Date().toLocaleString("en-GB")}</span></footer></article></div>;
 }
 
 function QrBatch({ assets, employees, departments, employeeMap }: { assets: Asset[]; employees: Employee[]; departments: string[]; employeeMap: Record<string, Employee> }) {

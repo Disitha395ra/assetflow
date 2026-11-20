@@ -127,6 +127,7 @@ button { cursor: pointer; }
 .available-asset-main strong, .available-asset-spec strong { font-size: 8.5px; }
 .available-asset-main small, .available-asset-spec small { margin-top: 3px; color: #8b909b; font-size: 7.5px; }
 .available-asset-condition { border-radius: 999px; padding: 5px 8px; background: #e9f8ef; color: #1b8250; font-size: 7px; font-weight: 800; }
+.available-asset-condition.condition-repair { background: #fff3e5; color: #c87518; border: 1px solid #f6d5a8; }
 .available-asset-list > button > svg { color: #765bdd; }
 .available-asset-empty { display: flex; align-items: center; gap: 10px; min-height: 80px; padding: 16px; color: #817f8b; background: #fff; }
 .available-asset-empty > svg { color: #8b73e9; }
@@ -182,7 +183,7 @@ code { color: #545b69; font: 8.5px Consolas, monospace; background: #f5f6f8; pad
 .status::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .status-available, .status-active, .status-approved { color: #14844e; background: #effaf4; border-color: #d3f0df; }
 .status-assigned { color: #3c64c9; background: #eff4ff; border-color: #dce6ff; }
-.status-in-repair, .status-pending { color: #c87518; background: #fff8ed; border-color: #f8e4c2; }
+.status-in-repair, .status-repair, .status-pending { color: #c87518; background: #fff3e5; border-color: #f6d5a8; }
 .status-retired, .status-resigned, .status-declined { color: #b54c4c; background: #fff0f0; border-color: #f5d4d4; }
 .row-action { border: 0; background: transparent; color: #7557e5; font-size: 15px; }
 .request-list { padding: 4px 18px 8px; }
@@ -388,6 +389,7 @@ select.status { appearance: none; cursor: pointer; padding-right: 8px; }
 .signature-grid span { border-top: 1px solid #2d333c; padding-top: 7px; font-size: 8px; font-weight: 700; }
 .signature-grid small { display: block; color: #8b9099; font-size: 6.5px; font-weight: normal; margin-top: 3px; }
 .document-condition { display: inline-block; color: #14784a; background: #edf9f3; border-radius: 99px; padding: 3px 7px; font-size: 7px; font-weight: 700; }
+.document-condition.condition-repair { color: #c87518; background: #fff3e5; }
 .print-document footer { border-top: 1px solid #e2e3e6; margin-top: 30px; padding-top: 11px; text-align: left; color: #9a9ea6; font-size: 6.5px; display: flex; align-items: center; justify-content: space-between; }
 .print-document footer strong { color: #6551b7; font-size: 7px; }
 .document-item-picker { border: 1px solid #e1e3e8; background: #fafafd; border-radius: 10px; padding: 12px; margin-bottom: 17px; }
@@ -482,7 +484,7 @@ select.status { appearance: none; cursor: pointer; padding-right: 8px; }
 .public-status { align-self: start; border: 1px solid #ffffff22; background: #ffffff10; border-radius: 99px; padding: 7px 10px; font-size: 8px; font-weight: 800; }
 .public-status-assigned { color: #b9a8ff; }
 .public-status-available { color: #72dfa4; }
-.public-status-in-repair { color: #ffb86b; }
+.public-status-in-repair, .public-status-repair { color: #ffb86b; background: #ff9c2a24; border-color: #ffb86b66; }
 .public-asset-layout { max-width: 1072px; margin: auto; padding-bottom: 60px; display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(270px, .75fr); gap: 18px; }
 .public-asset-layout > div { display: grid; gap: 18px; }
 .public-card { background: white; border: 1px solid #e4e6eb; border-radius: 14px; padding: 21px; box-shadow: 0 4px 14px #25324a07; }

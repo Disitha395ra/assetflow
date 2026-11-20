@@ -289,7 +289,7 @@ function statusTone(status: string): StyledCell["tone"] {
   const s = status.toLowerCase();
   if (s === "available" || s === "in stock" || s === "yes" || s === "active" || s === "restock") return "green";
   if (s === "assigned" || s === "issued") return "blue";
-  if (s === "in repair" || s === "low stock" || s === "pending") return "amber";
+  if (s === "in repair" || s === "repair" || s === "low stock" || s === "pending") return "amber";
   if (s === "retired" || s === "out of stock" || s === "no" || s === "resigned") return "red";
   return undefined;
 }
@@ -493,7 +493,7 @@ export function buildStaffMonitorsReport(
       { value: asset.specs?.resolution || "—", align: "center" },
       { value: asset.specs?.connector || "—", align: "center" },
       { value: asset.status, align: "center", tone: statusTone(asset.status) },
-      { value: asset.condition, align: "center" },
+      { value: asset.condition, align: "center", tone: statusTone(asset.condition) },
       verifiedCell(asset.verified),
     ];
   });
@@ -596,7 +596,7 @@ export function buildStaffHeadsetsReport(
       { value: asset.serial || "—" },
       { value: asset.specs?.connectivity || "—", align: "center" },
       { value: asset.status, align: "center", tone: statusTone(asset.status) },
-      { value: asset.condition, align: "center" },
+      { value: asset.condition, align: "center", tone: statusTone(asset.condition) },
       verifiedCell(asset.verified),
     ];
   });
@@ -658,7 +658,7 @@ export function buildStaffMousesReport(
       { value: asset.serial || "—" },
       { value: asset.specs?.connectivity || "—", align: "center" },
       { value: asset.status, align: "center", tone: statusTone(asset.status) },
-      { value: asset.condition, align: "center" },
+      { value: asset.condition, align: "center", tone: statusTone(asset.condition) },
       verifiedCell(asset.verified),
     ];
   });
@@ -763,7 +763,7 @@ export function buildEmployeeItAssetsReport(
       { value: asset.model || "—" },
       { value: asset.serial || "—" },
       { value: chips.join(" · ") || "—" },
-      { value: asset.condition, align: "center" },
+      { value: asset.condition, align: "center", tone: statusTone(asset.condition) },
       verifiedCell(asset.verified),
     ];
   });

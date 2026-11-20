@@ -96,7 +96,9 @@ export default function PublicAssetPage() {
           <h1>{asset.name}</h1>
           <p>{asset.brand} · {asset.model}</p>
         </div>
-        <span className={`public-status public-status-${asset.status.toLowerCase().replaceAll(" ", "-")}`}>{asset.status}</span>
+        <span className={`public-status public-status-${(asset.condition === "Repair" && asset.status !== "Retired" ? "In repair" : asset.status).toLowerCase().replaceAll(" ", "-")}`}>
+          {asset.condition === "Repair" && asset.status !== "Retired" ? "In repair" : asset.status}
+        </span>
       </section>
 
       <section className="public-asset-layout">

@@ -248,9 +248,16 @@ export function watchRequirementWindow(callback: (value: RequirementWindowRecord
 
 export async function saveRequirementWindow(value: RequirementWindowRecord) {
   if (!db) return;
+  const opensDate = new Date(value.opensAt || DEFAULT_REQUIREMENT_WINDOW.opensAt);
+  const closesDate = new Date(value.closesAt || DEFAULT_REQUIREMENT_WINDOW.closesAt);
+  const safeOpens = Number.isNaN(opensDate.getTime()) ? new Date(DEFAULT_REQUIREMENT_WINDOW.opensAt) : opensDate;
+  const safeCloses = Number.isNaN(closesDate.getTime()) ? new Date(DEFAULT_REQUIREMENT_WINDOW.closesAt) : closesDate;
+  const cleaned = Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  );
   await setDoc(doc(db, "settings", "requirement-window"), {
-    ...value,
-    opensAt: Timestamp.fromDate(new Date(value.opensAt)),
-    closesAt: Timestamp.fromDate(new Date(value.closesAt)),
+    ...cleaned,
+    opensAt: Timestamp.fromDate(safeOpens),
+    closesAt: Timestamp.fromDate(safeCloses),
   });
 }
