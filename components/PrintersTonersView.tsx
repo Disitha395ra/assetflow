@@ -10,6 +10,7 @@ import {
   Droplets,
   History,
   Layers,
+  Mail,
   MapPin,
   Package,
   Pencil,
@@ -67,6 +68,7 @@ export function PrintersTonersView({
   onDeleteToner,
   onStockAction,
   onExport,
+  onDownloadZeroStockReport,
 }: {
   printers: Asset[];
   toners: TonerStock[];
@@ -81,14 +83,25 @@ export function PrintersTonersView({
   onDeleteToner: (toner: TonerStock) => void;
   onStockAction: (toner: TonerStock, mode: "Restock" | "Issued", presetPrinterId?: string) => void;
   onExport: () => void;
+  onDownloadZeroStockReport: () => void;
 }) {
   const [printerModelFilter, setPrinterModelFilter] = useState("All");
   const [stockStatusFilter, setStockStatusFilter] = useState<"All" | "In stock" | "Low stock" | "Out of stock">("All");
 
   const totalTonerUnits = toners.reduce((sum, item) => sum + item.quantity, 0);
+  const zeroStockToners = toners.filter((item) => item.quantity <= 0);
   const lowStockCount = toners.filter((item) => item.quantity <= item.minStock).length;
   const deptAssignedPrinters = printers.filter((item) => item.allocationType === "department").length;
   const personAssignedPrinters = printers.filter((item) => Boolean(item.employeeId)).length;
+
+  const adminDeptMailto = useMemo(() => {
+    const subject = `Urgent Toner Requisition — ${zeroStockToners.length} Printer Toner SKU${zeroStockToners.length === 1 ? "" : "s"} at 0 Stock`;
+    const lines = zeroStockToners.map(
+      (t, idx) => `${idx + 1}. ${t.printerBrand ? `${t.printerBrand} ` : ""}${t.printerModel} — ${t.tonerModel} (${t.color}) | Stock: 0 | Suggested Order: ${Math.max(t.minStock * 2, 2)}`,
+    );
+    const body = `Dear Admin Department,\n\nThe following printer toner buffer(s) have reached 0 stock in AssetFlow and require replenishment:\n\n${lines.join("\n")}\n\nPlease find the detailed Excel requisition attached.\n\nRegards,\nIT Asset Management`;
+    return `mailto:admin@scot.lk?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  }, [zeroStockToners]);
 
   const allPrinterModels = useMemo(() => {
     const models = new Set<string>();
@@ -167,15 +180,35 @@ export function PrintersTonersView({
             <span>Available in store</span>
           </div>
         </article>
-        <article className="metric">
+        <article className={zeroStockToners.length > 0 ? "metric metric-zero-highlight" : "metric"}>
           <div className="metric-icon orange"><AlertTriangle size={21} /></div>
-          <p>Low / out of stock</p>
+          <p>Zero / low buffer</p>
           <div>
-            <strong>{lowStockCount}</strong>
-            <span>{lowStockCount ? "Reorder recommended" : "All models healthy"}</span>
+            <strong>{zeroStockToners.length > 0 ? zeroStockToners.length : lowStockCount}</strong>
+            <span>{zeroStockToners.length > 0 ? `${zeroStockToners.length} at 0 buffer · ${lowStockCount} total low` : lowStockCount ? "Reorder recommended" : "All models healthy"}</span>
           </div>
         </article>
       </div>
+
+      {zeroStockToners.length > 0 && (
+        <div className="zero-stock-banner">
+          <div>
+            <AlertTriangle size={20} />
+            <div>
+              <strong>{zeroStockToners.length} printer toner SKU{zeroStockToners.length === 1 ? "" : "s"} reached 0 buffer stock — Admin Dept requisition ready</strong>
+              <span>{zeroStockToners.map((t) => `${t.tonerModel} (${t.printerModel} · ${t.color})`).join(" · ")}</span>
+            </div>
+          </div>
+          <div className="page-actions">
+            <a className="button button-secondary button-sm" href={adminDeptMailto}>
+              <Mail size={14} />Email Admin Dept
+            </a>
+            <button type="button" className="button button-orange button-sm" onClick={onDownloadZeroStockReport}>
+              <Download size={14} />Download 0-Stock Requisition
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="filter-tabs">
         <button
@@ -375,13 +408,14 @@ export function PrintersTonersView({
                 modelToners.some((t) => tonerMatchesPrinter(t, p)),
               );
               const modelTotalQty = modelToners.reduce((sum, item) => sum + item.quantity, 0);
+              const hasZeroBuffer = modelToners.some((item) => item.quantity <= 0);
               const brandLabel = modelToners[0]?.printerBrand || matchingPrinters[0]?.brand || "";
 
               return (
-                <section className="panel toner-group-card" key={modelName}>
+                <section className={hasZeroBuffer ? "panel toner-group-card toner-card-zero" : "panel toner-group-card"} key={modelName}>
                   <div className="toner-group-head">
                     <div>
-                      <span className="section-kicker">PRINTER MODEL</span>
+                      <span className="section-kicker">{hasZeroBuffer ? "0 BUFFER — REORDER REQUIRED" : "PRINTER MODEL"}</span>
                       <h3>{brandLabel ? `${brandLabel} · ` : ""}{modelName}</h3>
                       <p>
                         {matchingPrinters.length > 0
@@ -390,6 +424,15 @@ export function PrintersTonersView({
                       </p>
                     </div>
                     <div className="toner-group-meta">
+                      {hasZeroBuffer && (
+                        <button
+                          type="button"
+                          className="button button-orange button-sm"
+                          onClick={onDownloadZeroStockReport}
+                        >
+                          <Download size={13} />0-Stock Requisition
+                        </button>
+                      )}
                       <span className="audit-badge"><Package size={13} />{modelTotalQty} total in stock</span>
                       <button
                         type="button"
@@ -417,7 +460,7 @@ export function PrintersTonersView({
                         {modelToners.map((toner) => {
                           const stockStatus = tonerStockStatus(toner);
                           return (
-                            <tr key={toner.id}>
+                            <tr key={toner.id} className={toner.quantity <= 0 ? "toner-row-zero" : ""}>
                               <td>
                                 <strong>{toner.tonerModel}</strong>
                                 <div className="muted" style={{ fontSize: "8px", marginTop: "2px" }}>Updated {toner.updatedAt}</div>
@@ -512,7 +555,8 @@ export function PrintersTonersView({
                       <th>Toner</th>
                       <th>Qty</th>
                       <th>Balance</th>
-                      <th>Issued to / destination</th>
+                      <th>Printer &amp; department</th>
+                      <th>Replaced / handled by</th>
                       <th>Note</th>
                     </tr>
                   </thead>
@@ -536,17 +580,16 @@ export function PrintersTonersView({
                         <td>
                           {tx.type === "Issued" ? (
                             <div>
-                              <strong>{tx.department || "—"}</strong>
-                              {(tx.printerName || tx.recipientName) && (
-                                <div className="muted" style={{ fontSize: "8px" }}>
-                                  {[tx.printerName, tx.recipientName].filter(Boolean).join(" · ")}
-                                </div>
-                              )}
+                              <strong>{tx.printerName || tx.department || "—"}</strong>
+                              <div className="muted" style={{ fontSize: "8px" }}>
+                                {[tx.printerCode, tx.department, tx.recipientName ? `For: ${tx.recipientName}` : ""].filter(Boolean).join(" · ")}
+                              </div>
                             </div>
                           ) : (
                             <span className="muted">Central IT Store</span>
                           )}
                         </td>
+                        <td><strong>{tx.performedBy || "IT Administration"}</strong></td>
                         <td>{tx.note || "—"}</td>
                       </tr>
                     ))}
@@ -573,19 +616,35 @@ export function TonerForm({
   onSave: (toner: TonerStock) => Promise<void> | void;
 }) {
   const knownPrinterModels = useMemo(() => {
-    const map = new Map<string, { brand: string; compatibleToner?: string }>();
+    const map = new Map<string, { brand: string; compatibleToner?: string; count: number }>();
     printers.forEach((p) => {
-      if (p.model.trim()) {
-        map.set(p.model.trim(), { brand: p.brand, compatibleToner: p.specs?.compatibleToner });
+      const m = p.model.trim();
+      if (m) {
+        const cur = map.get(m);
+        map.set(m, {
+          brand: cur?.brand || p.brand,
+          compatibleToner: cur?.compatibleToner || p.specs?.compatibleToner,
+          count: (cur?.count ?? 0) + 1,
+        });
       }
     });
     return map;
   }, [printers]);
 
+  const initialModel = initial?.printerModel ?? preset?.model ?? "";
+  const hasRegisteredModels = knownPrinterModels.size > 0;
+  const initialIsCustom = !hasRegisteredModels || (Boolean(initialModel) && !knownPrinterModels.has(initialModel));
+
+  const [modelSelect, setModelSelect] = useState(
+    initialIsCustom ? "__custom__" : (initialModel || Array.from(knownPrinterModels.keys())[0] || "__custom__"),
+  );
+  const firstKnownKey = Array.from(knownPrinterModels.keys())[0];
+  const firstKnownMeta = firstKnownKey ? knownPrinterModels.get(firstKnownKey) : undefined;
+
   const [form, setForm] = useState({
-    printerModel: initial?.printerModel ?? preset?.model ?? "",
-    printerBrand: initial?.printerBrand ?? preset?.brand ?? "",
-    tonerModel: initial?.tonerModel ?? preset?.compatibleToner ?? "",
+    printerModel: initialModel || (!initialIsCustom && firstKnownKey ? firstKnownKey : ""),
+    printerBrand: initial?.printerBrand ?? preset?.brand ?? (!initialIsCustom && firstKnownMeta ? firstKnownMeta.brand : ""),
+    tonerModel: initial?.tonerModel ?? preset?.compatibleToner ?? (!initialIsCustom && firstKnownMeta?.compatibleToner ? firstKnownMeta.compatibleToner : ""),
     color: (initial?.color ?? "Black") as TonerColor,
     quantity: String(initial?.quantity ?? 1),
     minStock: String(initial?.minStock ?? 2),
@@ -598,9 +657,10 @@ export function TonerForm({
       className="form-grid"
       onSubmit={(event) => {
         event.preventDefault();
+        const resolvedModel = modelSelect === "__custom__" ? form.printerModel.trim() : modelSelect.trim();
         onSave({
           id: initial?.id ?? crypto.randomUUID(),
-          printerModel: form.printerModel.trim(),
+          printerModel: resolvedModel,
           printerBrand: form.printerBrand.trim(),
           tonerModel: form.tonerModel.trim(),
           color: form.color,
@@ -612,30 +672,50 @@ export function TonerForm({
         });
       }}
     >
-      <label className="full">
-        Printer model
-        <input
+      <label className={modelSelect === "__custom__" ? "" : "full"}>
+        Mapped printer model
+        <select
           required
-          list="registered-printer-models"
-          placeholder="e.g. HP LaserJet Pro M404dn or Canon LBP6030"
-          value={form.printerModel}
+          aria-label="Mapped printer model"
+          value={modelSelect}
           onChange={(event) => {
             const val = event.target.value;
-            const match = knownPrinterModels.get(val.trim());
-            setForm({
-              ...form,
-              printerModel: val,
-              printerBrand: match?.brand ?? form.printerBrand,
-              tonerModel: !form.tonerModel && match?.compatibleToner ? match.compatibleToner : form.tonerModel,
-            });
+            setModelSelect(val);
+            if (val !== "__custom__") {
+              const match = knownPrinterModels.get(val);
+              setForm({
+                ...form,
+                printerModel: val,
+                printerBrand: match?.brand ?? form.printerBrand,
+                tonerModel: match?.compatibleToner || form.tonerModel,
+              });
+            }
           }}
-        />
-        <datalist id="registered-printer-models">
-          {Array.from(knownPrinterModels.keys()).map((model) => (
-            <option key={model} value={model} />
-          ))}
-        </datalist>
+        >
+          {hasRegisteredModels && (
+            <optgroup label="Registered Printer Models">
+              {Array.from(knownPrinterModels.entries()).map(([model, info]) => (
+                <option key={model} value={model}>
+                  {info.brand ? `${info.brand} · ` : ""}{model} ({info.count} printer{info.count === 1 ? "" : "s"})
+                </option>
+              ))}
+            </optgroup>
+          )}
+          <option value="__custom__">+ Enter new printer model…</option>
+        </select>
       </label>
+
+      {modelSelect === "__custom__" && (
+        <label>
+          New printer model name
+          <input
+            required
+            placeholder="e.g. HP LaserJet Pro M404dn or Canon LBP6030"
+            value={form.printerModel}
+            onChange={(event) => setForm({ ...form, printerModel: event.target.value })}
+          />
+        </label>
+      )}
 
       <label>
         Printer brand
@@ -725,6 +805,7 @@ export function TonerStockActionForm({
   departments,
   employees,
   presetPrinterId,
+  defaultPerformedBy = "",
   onSave,
 }: {
   toner: TonerStock;
@@ -733,17 +814,20 @@ export function TonerStockActionForm({
   departments: string[];
   employees: Employee[];
   presetPrinterId?: string;
+  defaultPerformedBy?: string;
   onSave: (payload: {
     quantity: number;
     printerAssetId?: string;
+    printerCode?: string;
     printerName?: string;
     department?: string;
     recipientName?: string;
+    performedBy?: string;
     note: string;
   }) => Promise<void> | void;
 }) {
   const matchedPrinters = printers.filter((p) => tonerMatchesPrinter(toner, p));
-  const printerChoices = matchedPrinters.length ? matchedPrinters : printers;
+  const otherPrinters = printers.filter((p) => !tonerMatchesPrinter(toner, p));
   const initialPrinter = printers.find((p) => p.id === presetPrinterId) ?? matchedPrinters[0];
   const initialEmployee = initialPrinter?.employeeId
     ? employees.find((e) => e.id === initialPrinter.employeeId)
@@ -758,6 +842,7 @@ export function TonerStockActionForm({
       "",
   );
   const [recipientName, setRecipientName] = useState(initialEmployee?.name ?? "");
+  const [performedBy, setPerformedBy] = useState(defaultPerformedBy || "IT Administrator");
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -776,10 +861,12 @@ export function TonerStockActionForm({
           await onSave({
             quantity: qtyNum,
             printerAssetId: mode === "Issued" ? selectedPrinter?.id : undefined,
+            printerCode: mode === "Issued" ? selectedPrinter?.code : undefined,
             printerName: mode === "Issued" ? selectedPrinter?.name : undefined,
             department: mode === "Issued" ? department : undefined,
             recipientName: mode === "Issued" ? recipientName.trim() : undefined,
-            note: note.trim() || (mode === "Restock" ? "Stock replenished" : "Toner issued for printer"),
+            performedBy: performedBy.trim() || defaultPerformedBy || "IT Administrator",
+            note: note.trim() || (mode === "Restock" ? "Stock replenished" : "Toner cartridge replaced"),
           });
         } finally {
           setSubmitting(false);
@@ -788,11 +875,11 @@ export function TonerStockActionForm({
     >
       <div className="asset-spec-heading full">
         <strong>{toner.tonerModel} ({toner.color}) — {toner.printerModel}</strong>
-        <span>Current stock: {toner.quantity} unit{toner.quantity === 1 ? "" : "s"} · Min alert: {toner.minStock}</span>
+        <span>Current stock: {toner.quantity} unit{toner.quantity === 1 ? "" : "s"} · Min buffer: {toner.minStock}</span>
       </div>
 
       <label>
-        {mode === "Restock" ? "Quantity to add" : "Quantity to issue"}
+        {mode === "Restock" ? "Quantity to add" : "Quantity to replace / issue"}
         <input
           required
           type="number"
@@ -810,7 +897,7 @@ export function TonerStockActionForm({
           value={
             mode === "Restock"
               ? `${toner.quantity + qtyNum} units`
-              : `${Math.max(0, toner.quantity - qtyNum)} units`
+              : `${Math.max(0, toner.quantity - qtyNum)} units${toner.quantity - qtyNum === 0 ? " (0 Buffer!)" : ""}`
           }
         />
       </label>
@@ -818,8 +905,9 @@ export function TonerStockActionForm({
       {mode === "Issued" && (
         <>
           <label className="full">
-            Target printer (optional)
+            Target printer (mapped by model)
             <select
+              aria-label="Target printer"
               value={printerAssetId}
               onChange={(e) => {
                 const nextId = e.target.value;
@@ -829,16 +917,29 @@ export function TonerStockActionForm({
                   const emp = chosen.employeeId ? employees.find((item) => item.id === chosen.employeeId) : undefined;
                   if (chosen.assignedDepartment) setDepartment(chosen.assignedDepartment);
                   else if (emp?.department) setDepartment(emp.department);
-                  if (emp?.name) setRecipientName(emp.name);
+                  setRecipientName(emp?.name ?? "");
                 }
               }}
             >
-              <option value="">Select printer (optional)</option>
-              {printerChoices.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} · {p.code} ({p.assignedDepartment || p.custodianName || p.location || "Stock"})
-                </option>
-              ))}
+              <option value="">Select printer to record replacement history (recommended)</option>
+              {matchedPrinters.length > 0 && (
+                <optgroup label={`Mapped Printers (${toner.printerModel})`}>
+                  {matchedPrinters.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.code} ({p.assignedDepartment || p.custodianName || p.location || "Stock"})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {otherPrinters.length > 0 && (
+                <optgroup label="Other Registered Printers">
+                  {otherPrinters.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} · {p.model} · {p.code} ({p.assignedDepartment || p.custodianName || "Stock"})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
           </label>
 
@@ -852,10 +953,10 @@ export function TonerStockActionForm({
           </label>
 
           <label>
-            Collected / installed by
+            Requested / collected by (staff)
             <input
               list="toner-recipient-employees"
-              placeholder="Employee name (optional)"
+              placeholder="Staff / custodian name"
               value={recipientName}
               onChange={(e) => setRecipientName(e.target.value)}
             />
@@ -869,12 +970,23 @@ export function TonerStockActionForm({
       )}
 
       <label className="full">
-        {mode === "Restock" ? "Supplier / PO / Restock note" : "Issue remarks"}
+        {mode === "Restock" ? "Received / updated by" : "Replaced / changed by (IT technician)"}
+        <input
+          required
+          list="toner-recipient-employees"
+          placeholder="Name or email of person performing the change"
+          value={performedBy}
+          onChange={(e) => setPerformedBy(e.target.value)}
+        />
+      </label>
+
+      <label className="full">
+        {mode === "Restock" ? "Supplier / PO / Restock note" : "Replacement remarks"}
         <input
           placeholder={
             mode === "Restock"
               ? "e.g. Invoice #4521, Supplier delivery"
-              : "e.g. Empty black cartridge replaced"
+              : "e.g. Replaced empty black cartridge, test print verified"
           }
           value={note}
           onChange={(e) => setNote(e.target.value)}
@@ -882,10 +994,10 @@ export function TonerStockActionForm({
       </label>
 
       <div className="form-actions full">
-        <p>{exceedsStock ? "Issue quantity cannot exceed available stock." : "Stock balance and audit log update immediately."}</p>
+        <p>{exceedsStock ? "Issue quantity cannot exceed available stock." : mode === "Issued" ? "Updates stock count, toner log & the printer's replacement history atomically." : "Stock balance and audit log update immediately."}</p>
         <button className="button button-primary" disabled={exceedsStock || submitting} type="submit">
           <Check size={17} />
-          {mode === "Restock" ? `Add +${qtyNum} to stock` : `Issue ${qtyNum} unit${qtyNum === 1 ? "" : "s"}`}
+          {mode === "Restock" ? `Add +${qtyNum} to stock` : `Replace & issue ${qtyNum} unit${qtyNum === 1 ? "" : "s"}`}
         </button>
       </div>
     </form>

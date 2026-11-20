@@ -182,20 +182,25 @@ export async function syncEmployeeCustodianOnAssets(
 export async function applyTonerStockTransaction<
   TToner extends { id: string; quantity: number; updatedAt: string },
   TTx extends { id: string; resultingStock: number },
+  TMovement extends { id: string; assetId: string; type: string; date: string; createdAt?: string; note: string; employeeId: string; employeeName?: string; department?: string },
 >(
   tonerFallback: TToner,
   mode: "Restock" | "Issued",
   quantity: number,
   buildTransaction: (resultingStock: number) => TTx,
-): Promise<{ updatedToner: TToner; transaction: TTx }> {
+  printerMovement?: TMovement,
+): Promise<{ updatedToner: TToner; transaction: TTx; movement?: TMovement }> {
   const safeQty = Math.floor(Math.max(1, quantity));
   if (!db) {
+    if (mode === "Issued" && safeQty > tonerFallback.quantity) {
+      throw new Error(`Insufficient stock: only ${tonerFallback.quantity} unit(s) remaining.`);
+    }
     const nextQty = mode === "Restock"
       ? tonerFallback.quantity + safeQty
       : Math.max(0, tonerFallback.quantity - safeQty);
     const updatedToner = { ...tonerFallback, quantity: nextQty };
     const transaction = buildTransaction(nextQty);
-    return { updatedToner, transaction };
+    return { updatedToner, transaction, movement: printerMovement };
   }
 
   return runTransaction(db, async (tx) => {
@@ -212,7 +217,22 @@ export async function applyTonerStockTransaction<
     const transaction = buildTransaction(nextQty);
     tx.set(tonerRef, stripUndefined(updatedToner));
     tx.set(doc(db, "tonerTransactions", transaction.id), stripUndefined(transaction));
-    return { updatedToner, transaction };
+    if (printerMovement) {
+      tx.set(doc(db, "movements", printerMovement.id), stripUndefined(printerMovement));
+      tx.set(
+        doc(db, "assets", printerMovement.assetId, "history", printerMovement.id),
+        stripUndefined({
+          id: printerMovement.id,
+          type: printerMovement.type,
+          date: printerMovement.date,
+          createdAt: printerMovement.createdAt,
+          note: printerMovement.note,
+          employeeName: printerMovement.employeeName ?? "IT Administration",
+          department: printerMovement.department ?? "Central Stock",
+        }),
+      );
+    }
+    return { updatedToner, transaction, movement: printerMovement };
   });
 }
 

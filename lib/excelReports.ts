@@ -935,7 +935,7 @@ export function buildPrinterAndTonerReport(
     ];
   });
 
-  const sortedTx = [...transactions].sort((a, b) => b.date.localeCompare(a.date));
+  const sortedTx = [...transactions].sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date));
   const txRows: StyledCell[][] = sortedTx.map((tx, idx) => [
     { value: idx + 1, align: "center", isNumber: true },
     { value: tx.date, align: "center" },
@@ -946,7 +946,8 @@ export function buildPrinterAndTonerReport(
     { value: tx.type === "Restock" ? `+${tx.quantity}` : `-${tx.quantity}`, align: "center", tone: tx.type === "Restock" ? "green" : "blue" },
     { value: tx.resultingStock, align: "center", isNumber: true },
     { value: tx.department || "Central IT Store" },
-    { value: tx.printerName || "—" },
+    { value: tx.printerName ? `${tx.printerName}${tx.printerCode ? ` (${tx.printerCode})` : ""}` : "—" },
+    { value: tx.performedBy || "IT Administration" },
     { value: tx.recipientName || "—" },
     { value: tx.note || "—" },
   ]);
@@ -1015,16 +1016,177 @@ export function buildPrinterAndTonerReport(
       { header: "Qty Moved", align: "center", minWidth: 12 },
       { header: "Balance After", align: "center", minWidth: 14 },
       { header: "Department", minWidth: 22 },
-      { header: "Printer Name", minWidth: 22 },
-      { header: "Recipient / Staff", minWidth: 20 },
+      { header: "Printer Name & Code", minWidth: 24 },
+      { header: "Replaced / Handled By", minWidth: 22 },
+      { header: "Requested / Collected By", minWidth: 20 },
       { header: "Note", minWidth: 26 },
     ],
     rows: txRows,
-    footerRow: ["", "", `Total Logs: ${sortedTx.length}`, "", "", "", "", "", "", "", "", ""],
+    footerRow: ["", "", `Total Logs: ${sortedTx.length}`, "", "", "", "", "", "", "", "", "", ""],
   };
 
   return {
     sheets: [printersSheet, tonerStockSheet, txSheet],
     filename: `AssetFlow-Report-6-Printers-and-Toners-${isoDate()}.xlsx`,
+  };
+}
+
+// ============================================================
+// ADMIN DEPT REQUISITION: ZERO-STOCK (0 BUFFER) TONER REPORT
+// ============================================================
+export function buildZeroStockTonerRequisitionReport(
+  assets: Asset[],
+  toners: TonerStock[],
+  transactions: TonerTransaction[],
+  employeeMap: Record<string, Employee>,
+): { sheets: StyledSheet[]; filename: string } {
+  const generated = formattedDateLabel();
+  const printers = assets.filter((a) => a.type === "Printer");
+  const zeroToners = [...toners.filter((t) => t.quantity <= 0)].sort((a, b) =>
+    a.printerModel.localeCompare(b.printerModel, undefined, { sensitivity: "base" }) || a.color.localeCompare(b.color),
+  );
+  const lowToners = [...toners.filter((t) => t.quantity > 0 && t.quantity <= t.minStock)].sort((a, b) =>
+    a.printerModel.localeCompare(b.printerModel, undefined, { sensitivity: "base" }) || a.color.localeCompare(b.color),
+  );
+  const sortedTx = [...transactions].sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date));
+
+  const formatAffectedPrinters = (toner: TonerStock) => {
+    const matched = printers.filter((p) => tonerMatchesPrinter(toner, p));
+    if (!matched.length) return "No printer currently mapped";
+    return matched
+      .map((p) => {
+        const owner = p.employeeId ? `${employeeMap[p.employeeId]?.name} (${employeeMap[p.employeeId]?.department})` : p.assignedDepartment || p.location || "Central Stock";
+        return `${p.name} [${owner}]`;
+      })
+      .join("; ");
+  };
+
+  const formatLastIssue = (toner: TonerStock) => {
+    const last = sortedTx.find((tx) => tx.tonerId === toner.id && tx.type === "Issued");
+    if (!last) return "—";
+    return `${last.date} · By ${last.performedBy || "IT"} (${last.department || last.printerName || "—"})`;
+  };
+
+  let totalSuggestedOrder = 0;
+  const zeroRows: StyledCell[][] = zeroToners.map((toner, idx) => {
+    const suggestedOrder = Math.max(toner.minStock * 2, 2);
+    totalSuggestedOrder += suggestedOrder;
+    return [
+      { value: idx + 1, align: "center", isNumber: true },
+      { value: toner.printerBrand || "—" },
+      { value: toner.printerModel },
+      { value: toner.tonerModel },
+      { value: toner.color, align: "center" },
+      { value: toner.quantity, align: "center", tone: "red", isNumber: true },
+      { value: toner.minStock, align: "center", isNumber: true },
+      { value: suggestedOrder, align: "center", tone: "amber", isNumber: true },
+      { value: "URGENT — 0 STOCK", align: "center", tone: "red" },
+      { value: formatAffectedPrinters(toner) },
+      { value: formatLastIssue(toner) },
+      { value: toner.storageLocation || "Central IT Store" },
+      { value: toner.notes || "Immediate procurement requested from Admin Dept" },
+    ];
+  });
+
+  const zeroSheet: StyledSheet = {
+    name: "Zero-Stock Requisition",
+    title: "ADMIN DEPT — URGENT ZERO-STOCK TONER REQUISITION",
+    subtitle: `Generated on ${generated} · Submitted by IT Asset Management · SKUs at 0 Buffer: ${zeroToners.length} · Suggested Total Order: ${totalSuggestedOrder} units`,
+    columns: [
+      { header: "#", align: "center", minWidth: 6 },
+      { header: "Printer Brand", minWidth: 14 },
+      { header: "Printer Model", minWidth: 24 },
+      { header: "Toner Model / Code", minWidth: 22 },
+      { header: "Color / Type", align: "center", minWidth: 14 },
+      { header: "Current Stock", align: "center", minWidth: 14 },
+      { header: "Min Buffer", align: "center", minWidth: 12 },
+      { header: "Suggested Order Qty", align: "center", minWidth: 18 },
+      { header: "Priority", align: "center", minWidth: 18 },
+      { header: "Affected Printers & Departments", minWidth: 32, maxWidth: 46 },
+      { header: "Last Replacement (Date & By Whom)", minWidth: 28, maxWidth: 42 },
+      { header: "Store Location", minWidth: 18 },
+      { header: "Notes", minWidth: 24 },
+    ],
+    rows: zeroRows,
+    footerRow: ["", "", `Zero-Stock Toner SKUs: ${zeroToners.length}`, "", "", 0, "", totalSuggestedOrder, "SEND TO ADMIN DEPT", "", "", "", ""],
+  };
+
+  const lowRows: StyledCell[][] = lowToners.map((toner, idx) => [
+    { value: idx + 1, align: "center", isNumber: true },
+    { value: toner.printerBrand || "—" },
+    { value: toner.printerModel },
+    { value: toner.tonerModel },
+    { value: toner.color, align: "center" },
+    { value: toner.quantity, align: "center", tone: "amber", isNumber: true },
+    { value: toner.minStock, align: "center", isNumber: true },
+    { value: Math.max(toner.minStock * 2 - toner.quantity, 1), align: "center", isNumber: true },
+    { value: formatAffectedPrinters(toner) },
+    { value: formatLastIssue(toner) },
+  ]);
+
+  const lowSheet: StyledSheet = {
+    name: "Low Buffer Watchlist",
+    title: "ADMIN DEPT — LOW BUFFER TONER WATCHLIST",
+    subtitle: `Generated on ${generated} · Toners at or below minimum buffer (still > 0) · Count: ${lowToners.length}`,
+    columns: [
+      { header: "#", align: "center", minWidth: 6 },
+      { header: "Printer Brand", minWidth: 14 },
+      { header: "Printer Model", minWidth: 24 },
+      { header: "Toner Model / Code", minWidth: 22 },
+      { header: "Color / Type", align: "center", minWidth: 14 },
+      { header: "Current Stock", align: "center", minWidth: 14 },
+      { header: "Min Buffer", align: "center", minWidth: 12 },
+      { header: "Recommended Top-Up", align: "center", minWidth: 18 },
+      { header: "Affected Printers & Departments", minWidth: 32, maxWidth: 46 },
+      { header: "Last Replacement", minWidth: 28, maxWidth: 42 },
+    ],
+    rows: lowRows,
+    footerRow: ["", "", `Low Buffer SKUs: ${lowToners.length}`, "", "", "", "", "", "", ""],
+  };
+
+  const zeroIds = new Set(zeroToners.map((t) => t.id));
+  const recentZeroTx = sortedTx.filter((tx) => zeroIds.has(tx.tonerId) || zeroToners.length === 0).slice(0, 50);
+  const historyRows: StyledCell[][] = recentZeroTx.map((tx, idx) => [
+    { value: idx + 1, align: "center", isNumber: true },
+    { value: tx.date, align: "center" },
+    { value: tx.type, align: "center", tone: statusTone(tx.type) },
+    { value: tx.printerModel },
+    { value: tx.tonerModel },
+    { value: tx.color, align: "center" },
+    { value: tx.type === "Restock" ? `+${tx.quantity}` : `-${tx.quantity}`, align: "center" },
+    { value: tx.resultingStock, align: "center", isNumber: true },
+    { value: tx.department || "—" },
+    { value: tx.printerName || "—" },
+    { value: tx.performedBy || "IT Administration" },
+    { value: tx.recipientName || "—" },
+    { value: tx.note || "—" },
+  ]);
+
+  const historySheet: StyledSheet = {
+    name: "Replacement Audit Log",
+    title: "TONER REPLACEMENT & USAGE PROOF (FOR ADMIN DEPT)",
+    subtitle: `Generated on ${generated} · Showing usage history for depleted toners · Records: ${recentZeroTx.length}`,
+    columns: [
+      { header: "#", align: "center", minWidth: 6 },
+      { header: "Date", align: "center", minWidth: 13 },
+      { header: "Action", align: "center", minWidth: 12 },
+      { header: "Printer Model", minWidth: 22 },
+      { header: "Toner Model", minWidth: 20 },
+      { header: "Color", align: "center", minWidth: 12 },
+      { header: "Qty", align: "center", minWidth: 10 },
+      { header: "Balance After", align: "center", minWidth: 14 },
+      { header: "Department", minWidth: 22 },
+      { header: "Printer", minWidth: 22 },
+      { header: "Replaced By", minWidth: 20 },
+      { header: "Requested / Collected By", minWidth: 20 },
+      { header: "Remarks", minWidth: 24 },
+    ],
+    rows: historyRows,
+    footerRow: ["", "", `Total Logs: ${recentZeroTx.length}`, "", "", "", "", "", "", "", "", "", ""],
+  };
+
+  return {
+    sheets: [zeroSheet, lowSheet, historySheet],
+    filename: `AssetFlow-Zero-Stock-Toner-Requisition-Admin-${isoDate()}.xlsx`,
   };
 }

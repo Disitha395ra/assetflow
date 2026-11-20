@@ -39,7 +39,7 @@ export type Movement = {
   id: string;
   assetId: string;
   employeeId: string;
-  type: "Assigned" | "Returned" | "Repair" | "Cleared";
+  type: "Assigned" | "Returned" | "Repair" | "Cleared" | "Toner Replacement";
   date: string;
   createdAt?: string;
   note: string;
@@ -94,9 +94,11 @@ export type TonerTransaction = {
   quantity: number;
   resultingStock: number;
   printerAssetId?: string;
+  printerCode?: string;
   printerName?: string;
   department?: string;
   recipientName?: string;
+  performedBy?: string;
   date: string;
   createdAt?: string;
   note: string;

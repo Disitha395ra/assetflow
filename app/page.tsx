@@ -99,6 +99,7 @@ import {
   buildStaffLaptopsReport,
   buildStaffMonitorsReport,
   buildStaffMousesReport,
+  buildZeroStockTonerRequisitionReport,
   downloadStyledWorkbook,
 } from "@/lib/excelReports";
 import type {
@@ -391,26 +392,53 @@ export default function Home() {
     flash(`${toner.tonerModel} removed from toner stock`);
   }
 
+  async function downloadZeroStockTonerReport() {
+    const { sheets, filename } = buildZeroStockTonerRequisitionReport(assets, toners, tonerTransactions, employeeMap);
+    await downloadStyledWorkbook(sheets, filename);
+    flash(`Zero-stock toner requisition downloaded for Admin Dept`);
+  }
+
   async function handleTonerStockAction(
     toner: TonerStock,
     mode: "Restock" | "Issued",
     payload: {
       quantity: number;
       printerAssetId?: string;
+      printerCode?: string;
       printerName?: string;
       department?: string;
       recipientName?: string;
+      performedBy?: string;
       note: string;
     },
   ) {
     try {
       const nowIso = new Date().toISOString();
-      const { updatedToner, transaction } = await applyTonerStockTransaction(
+      const txId = crypto.randomUUID();
+      const actor = payload.performedBy?.trim() || signedInEmail || "IT Administrator";
+      const targetPrinter = payload.printerAssetId ? assets.find((a) => a.id === payload.printerAssetId) : undefined;
+
+      const printerMovement: Movement | undefined =
+        mode === "Issued" && payload.printerAssetId
+          ? {
+              id: txId,
+              assetId: payload.printerAssetId,
+              employeeId: targetPrinter?.employeeId || "",
+              type: "Toner Replacement",
+              date: today(),
+              createdAt: nowIso,
+              employeeName: actor,
+              department: payload.department || targetPrinter?.assignedDepartment || targetPrinter?.custodianDepartment || "Central Stock",
+              note: `Replaced ${payload.quantity}× ${toner.tonerModel} (${toner.color}) by ${actor}${payload.recipientName ? ` · Requested by ${payload.recipientName}` : ""}${payload.note ? ` · ${payload.note}` : ""}`,
+            }
+          : undefined;
+
+      const { updatedToner, transaction, movement } = await applyTonerStockTransaction(
         { ...toner, updatedAt: today() },
         mode,
         payload.quantity,
         (resultingStock): TonerTransaction => ({
-          id: crypto.randomUUID(),
+          id: txId,
           tonerId: toner.id,
           printerModel: toner.printerModel,
           tonerModel: toner.tonerModel,
@@ -419,22 +447,30 @@ export default function Home() {
           quantity: payload.quantity,
           resultingStock,
           printerAssetId: payload.printerAssetId,
-          printerName: payload.printerName,
+          printerCode: payload.printerCode || targetPrinter?.code,
+          printerName: payload.printerName || targetPrinter?.name,
           department: payload.department,
           recipientName: payload.recipientName,
+          performedBy: actor,
           date: today(),
           createdAt: nowIso,
           note: payload.note,
         }),
+        printerMovement,
       );
       setToners((rows) => rows.map((row) => (row.id === updatedToner.id ? updatedToner : row)));
       setTonerTransactions((rows) => [transaction, ...rows]);
+      if (movement) {
+        setMovements((rows) => [movement, ...rows]);
+      }
       setTonerAction(null);
       setModal(null);
       flash(
         mode === "Restock"
           ? `Added +${payload.quantity} ${toner.tonerModel} (${updatedToner.quantity} in stock)`
-          : `Issued ${payload.quantity} ${toner.tonerModel}${payload.department ? ` to ${payload.department}` : ""} (${updatedToner.quantity} left)`,
+          : updatedToner.quantity === 0
+            ? `Replaced ${payload.quantity}× ${toner.tonerModel} — BUFFER NOW AT 0! Download requisition for Admin Dept.`
+            : `Replaced ${payload.quantity}× ${toner.tonerModel}${payload.printerName ? ` on ${payload.printerName}` : ""} (${updatedToner.quantity} left)`,
       );
     } catch (err: unknown) {
       flash(err instanceof Error ? err.message : "Could not update toner stock.");
@@ -785,6 +821,7 @@ export default function Home() {
                 setPrintersSubTab(tab);
                 setView("Printers & Toners");
               }}
+              onDownloadZeroStockReport={downloadZeroStockTonerReport}
               onAddAsset={() => {
                 setEditingAsset(null);
                 setPresetAssetType(undefined);
@@ -831,6 +868,7 @@ export default function Home() {
               onDeleteToner={deleteToner}
               onStockAction={(toner, mode, presetPrinterId) => { setTonerAction({ toner, mode, presetPrinterId }); setModal("tonerStock"); }}
               onExport={() => exportWorkbook(printerAssets)}
+              onDownloadZeroStockReport={downloadZeroStockTonerReport}
             />
           )}
           {view === "Employees" && (
@@ -861,6 +899,7 @@ export default function Home() {
               requests={requests}
               onExport={exportWorkbook}
               onDocument={openDocument}
+              onDownloadZeroStockReport={downloadZeroStockTonerReport}
               onDownloadStructuredReport={async (reportId) => {
                 const reportMap = {
                   laptops: () => buildStaffLaptopsReport(assets, employeeMap),
@@ -910,6 +949,7 @@ export default function Home() {
               departments={departments}
               locations={locations}
               employees={employees}
+              toners={toners}
               initial={editingAsset ?? undefined}
               defaultType={presetAssetType}
               onSave={async (asset) => {
@@ -965,6 +1005,7 @@ export default function Home() {
               departments={departments}
               employees={employees}
               presetPrinterId={tonerAction.presetPrinterId}
+              defaultPerformedBy={signedInEmail || ADMIN_EMAIL}
               onSave={(payload) => handleTonerStockAction(tonerAction.toner, tonerAction.mode, payload)}
             />
           )}
@@ -1177,6 +1218,7 @@ function Dashboard({
   assetMap,
   onView,
   onOpenPrinters,
+  onDownloadZeroStockReport,
   onAddAsset,
   onAssign,
   onReturn,
@@ -1194,6 +1236,7 @@ function Dashboard({
   assetMap: Record<string, Asset>;
   onView: (view: View) => void;
   onOpenPrinters: (tab: "Printers" | "Toner Stock") => void;
+  onDownloadZeroStockReport: () => void;
   onAddAsset: () => void;
   onAssign: () => void;
   onReturn: () => void;
@@ -1203,6 +1246,7 @@ function Dashboard({
   const assigned = assets.filter((asset) => effectiveAssetStatus(asset) === "Assigned").length;
   const available = assets.filter((asset) => effectiveAssetStatus(asset) === "Available").length;
   const repairCount = assets.filter((asset) => effectiveAssetStatus(asset) === "In repair").length;
+  const zeroToners = toners.filter((toner) => toner.quantity <= 0);
   const lowToners = toners.filter((toner) => toner.quantity <= toner.minStock);
 
   return (
@@ -1217,12 +1261,26 @@ function Dashboard({
         <Metric icon={ClipboardCheck} label="Available stock" value={available.toString()} change="Ready to assign" tone="green" />
         <Metric icon={Wrench} label="Needs attention" value={repairCount.toString()} change="Items currently in repair" tone="orange" />
       </div>
-      {lowToners.length > 0 && (
+      {zeroToners.length > 0 ? (
+        <div className="zero-stock-banner">
+          <div>
+            <AlertTriangle size={20} />
+            <div>
+              <strong>{zeroToners.length} printer toner SKU{zeroToners.length === 1 ? "" : "s"} reached 0 buffer — send requisition to Admin Dept</strong>
+              <span>{zeroToners.slice(0, 3).map((t) => `${t.tonerModel} (${t.printerModel} · ${t.color}: 0 left)`).join(" · ")}</span>
+            </div>
+          </div>
+          <div className="page-actions">
+            <button className="button button-secondary button-sm" onClick={() => onOpenPrinters("Toner Stock")}><Droplets size={14} />View toners</button>
+            <button className="button button-orange button-sm" onClick={onDownloadZeroStockReport}><Download size={14} />Download 0-Stock Report (Admin Dept)</button>
+          </div>
+        </div>
+      ) : lowToners.length > 0 && (
         <div className="toner-alert-banner">
           <div>
             <AlertTriangle size={20} />
             <div>
-              <strong>{lowToners.length} printer toner SKU{lowToners.length === 1 ? "" : "s"} running low or out of stock</strong>
+              <strong>{lowToners.length} printer toner SKU{lowToners.length === 1 ? "" : "s"} running low on buffer stock</strong>
               <span>{lowToners.slice(0, 3).map((t) => `${t.tonerModel} (${t.printerModel}: ${t.quantity} left)`).join(" · ")}</span>
             </div>
           </div>
@@ -1237,6 +1295,7 @@ function Dashboard({
         toners={toners}
         onViewAssets={() => onView("Assets")}
         onOpenToners={() => onOpenPrinters("Toner Stock")}
+        onDownloadZeroStockReport={onDownloadZeroStockReport}
         onAsset={onAsset}
       />
       <div className="dashboard-grid">
@@ -1246,8 +1305,8 @@ function Dashboard({
             {movements.length === 0 && <div className="empty-panel"><History size={20} /><strong>No movements yet</strong><span>Assignments and returns will appear here.</span></div>}
             {movements.slice(0, 5).map((movement) => (
               <div className="activity-row" key={movement.id}>
-                <div className={`activity-icon activity-${movement.type.toLowerCase()}`}>{movement.type === "Assigned" ? <ArrowLeftRight size={17} /> : movement.type === "Repair" ? <Wrench size={17} /> : <RotateCcw size={17} />}</div>
-                <div><strong>{assetMap[movement.assetId]?.name}</strong><p>{movement.type} {movement.employeeId && <>· {employeeMap[movement.employeeId]?.name}</>}</p></div>
+                <div className={`activity-icon activity-${movement.type.toLowerCase().replaceAll(" ", "-")}`}>{movement.type === "Assigned" ? <ArrowLeftRight size={17} /> : movement.type === "Repair" ? <Wrench size={17} /> : movement.type === "Toner Replacement" ? <Droplets size={17} /> : <RotateCcw size={17} />}</div>
+                <div><strong>{assetMap[movement.assetId]?.name}</strong><p>{movement.type} {(movement.employeeName || (movement.employeeId && employeeMap[movement.employeeId]?.name)) && <>· {movement.employeeName || employeeMap[movement.employeeId]?.name}</>}</p></div>
                 <time>{new Date(movement.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</time>
               </div>
             ))}
@@ -1288,6 +1347,7 @@ function DepartmentAvailability({
   toners,
   onViewAssets,
   onOpenToners,
+  onDownloadZeroStockReport,
   onAsset,
 }: {
   assets: Asset[];
@@ -1297,6 +1357,7 @@ function DepartmentAvailability({
   toners: TonerStock[];
   onViewAssets: () => void;
   onOpenToners: () => void;
+  onDownloadZeroStockReport: () => void;
   onAsset: (asset: Asset) => void;
 }) {
   const [selectedDepartment, setSelectedDepartment] = useState("All departments");
@@ -1331,6 +1392,7 @@ function DepartmentAvailability({
       ? toners
       : toners.filter((toner) => departmentPrinters.some((printer) => tonerMatchesPrinter(toner, printer)));
   const totalTonerUnits = relevantToners.reduce((sum, item) => sum + item.quantity, 0);
+  const zeroTonerCount = relevantToners.filter((item) => item.quantity <= 0).length;
   const showTonerCard = selectedDepartment === "All departments" || selectedDepartment === "Central Stock" || relevantToners.length > 0;
   const selectedAvailableAssets = availableAssets.filter((asset) => asset.type === selectedType);
 
@@ -1369,7 +1431,7 @@ function DepartmentAvailability({
         {showTonerCard && (
           <button
             type="button"
-            className={selectedType === "Toner" ? "active" : ""}
+            className={`${selectedType === "Toner" ? "active" : ""}${zeroTonerCount > 0 ? " card-zero-highlight" : ""}`}
             key="Toner"
             aria-expanded={selectedType === "Toner"}
             aria-controls="available-asset-details"
@@ -1377,10 +1439,10 @@ function DepartmentAvailability({
           >
             <div>
               <strong>Toner</strong>
-              <span>{relevantToners.length} SKU{relevantToners.length === 1 ? "" : "s"} in stock</span>
+              <span>{zeroTonerCount > 0 ? `${zeroTonerCount} at 0 buffer — Reorder!` : `${relevantToners.length} SKU${relevantToners.length === 1 ? "" : "s"} in stock`}</span>
             </div>
             <b>{totalTonerUnits}</b>
-            <small>{selectedType === "Toner" ? "Hide details" : "View toner stock"}</small>
+            <small>{selectedType === "Toner" ? "Hide details" : zeroTonerCount > 0 ? "0 stock alert — View" : "View toner stock"}</small>
           </button>
         )}
       </div>
@@ -1391,14 +1453,21 @@ function DepartmentAvailability({
       <div className="available-asset-details" id="available-asset-details">
         <div className="available-asset-details-head">
           <div><span>TONER STOCK</span><h3>Toner · {selectedDepartment}</h3></div>
-          <strong>{totalTonerUnits} unit{totalTonerUnits === 1 ? "" : "s"}</strong>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            {zeroTonerCount > 0 && (
+              <button type="button" className="button button-orange button-sm" onClick={onDownloadZeroStockReport}>
+                <Download size={13} />Download 0-Stock Report (Admin Dept)
+              </button>
+            )}
+            <strong>{totalTonerUnits} unit{totalTonerUnits === 1 ? "" : "s"}</strong>
+          </div>
         </div>
         {relevantToners.length ? (
           <div className="available-asset-list">
             {relevantToners.map((toner) => {
               const st = tonerStockStatus(toner);
               return (
-                <button type="button" key={toner.id} onClick={onOpenToners}>
+                <button type="button" className={toner.quantity <= 0 ? "toner-row-zero" : ""} key={toner.id} onClick={onOpenToners}>
                   <span className="available-asset-icon"><Droplets size={18} /></span>
                   <span className="available-asset-main">
                     <strong>{toner.tonerModel} ({toner.color})</strong>
@@ -1651,7 +1720,7 @@ function MovementsView({ movements, assetMap, employeeMap, onAssign, onReturn, o
       </PageHead>
       <section className="panel timeline-panel">
         <div className="table-toolbar"><div><strong>Complete history</strong><small>Newest activity first</small></div><span className="audit-badge"><ShieldCheck size={15} />Audit-ready records</span></div>
-        <div className="timeline">{movements.length === 0 && <div className="empty-panel"><History size={20} /><strong>No lifecycle records yet</strong><span>Assignments, returns, clearance and repairs will appear here.</span></div>}{movements.map((movement) => <div key={movement.id} className="timeline-row"><div className={`timeline-mark activity-${movement.type.toLowerCase()}`}>{movement.type === "Assigned" ? <ArrowLeftRight size={17} /> : movement.type === "Repair" ? <Wrench size={17} /> : <RotateCcw size={17} />}</div><div><div className="timeline-title"><strong>{movement.type}</strong><span>{new Date(movement.date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</span></div><h3>{assetMap[movement.assetId]?.name} <small>{assetMap[movement.assetId]?.code}</small></h3><p>{movement.note}</p><span className="person-pill">{initials(employeeMap[movement.employeeId]?.name || "AA")} {employeeMap[movement.employeeId]?.name || "Asset Administration"}</span></div></div>)}</div>
+        <div className="timeline">{movements.length === 0 && <div className="empty-panel"><History size={20} /><strong>No lifecycle records yet</strong><span>Assignments, returns, clearance, repairs and toner replacements will appear here.</span></div>}{movements.map((movement) => <div key={movement.id} className="timeline-row"><div className={`timeline-mark activity-${movement.type.toLowerCase().replaceAll(" ", "-")}`}>{movement.type === "Assigned" ? <ArrowLeftRight size={17} /> : movement.type === "Repair" ? <Wrench size={17} /> : movement.type === "Toner Replacement" ? <Droplets size={17} /> : <RotateCcw size={17} />}</div><div><div className="timeline-title"><strong>{movement.type}</strong><span>{new Date(movement.date).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}</span></div><h3>{assetMap[movement.assetId]?.name} <small>{assetMap[movement.assetId]?.code}</small></h3><p>{movement.note}</p><span className="person-pill">{initials(movement.employeeName || employeeMap[movement.employeeId]?.name || "AA")} {movement.employeeName || employeeMap[movement.employeeId]?.name || "Asset Administration"}</span></div></div>)}</div>
       </section>
     </>
   );
@@ -1693,6 +1762,7 @@ function ReportsView({
   requests,
   onExport,
   onDocument,
+  onDownloadZeroStockReport,
   onDownloadStructuredReport,
 }: {
   assets: Asset[];
@@ -1703,9 +1773,11 @@ function ReportsView({
   requests: RequestRow[];
   onExport: () => void;
   onDocument: (type: string) => void;
+  onDownloadZeroStockReport: () => void;
   onDownloadStructuredReport: (id: StructuredReportId) => Promise<void>;
 }) {
   const [downloading, setDownloading] = useState<string>("");
+  const zeroTonerCount = toners.filter((t) => t.quantity <= 0).length;
 
   const laptopCount = assets.filter((a) => a.type === "Laptop").length;
   const staffMonitorCount = assets.filter((a) => a.type === "Monitor").length;
@@ -1800,6 +1872,9 @@ function ReportsView({
   return (
     <>
       <PageHead eyebrow="DOCUMENT CENTRE" title="Reports & documents" description="Download cleanly formatted Excel reports sorted A–Z by Department, or generate official PDF handover and clearance documents.">
+        <button className={zeroTonerCount > 0 ? "button button-orange" : "button button-secondary"} onClick={onDownloadZeroStockReport}>
+          <AlertTriangle size={16} />0-Stock Toner Requisition ({zeroTonerCount})
+        </button>
         <button className="button button-secondary" onClick={onExport}><Download size={17} />Export master register</button>
       </PageHead>
 
@@ -2095,10 +2170,10 @@ function AssetDrawer({
                   {matchedToners.map((toner) => {
                     const st = tonerStockStatus(toner);
                     return (
-                      <div className="toner-drawer-row" key={toner.id}>
+                      <div className={toner.quantity <= 0 ? "toner-drawer-row toner-drawer-row-zero" : "toner-drawer-row"} key={toner.id}>
                         <div>
                           <strong>{toner.tonerModel} ({toner.color})</strong>
-                          <small>{toner.quantity} in stock · min {toner.minStock}</small>
+                          <small>{toner.quantity} in stock · min {toner.minStock}{toner.quantity <= 0 ? " · 0 BUFFER" : ""}</small>
                         </div>
                         <div>
                           <span className={statusClass(st)}>{st}</span>
@@ -2107,7 +2182,7 @@ function AssetDrawer({
                             className="button button-secondary button-sm"
                             onClick={() => onTonerStockAction(toner, toner.quantity > 0 ? "Issued" : "Restock", asset.id)}
                           >
-                            {toner.quantity > 0 ? "Issue" : "Restock"}
+                            {toner.quantity > 0 ? "Replace / Issue" : "Restock"}
                           </button>
                         </div>
                       </div>
@@ -2129,7 +2204,7 @@ function AssetDrawer({
           </section>
           <section className="detail-section">
             <h3>History</h3>
-            <div className="mini-history">{movements.length ? movements.map((movement) => <div key={movement.id}><i /><div><strong>{movement.type}</strong><p>{employeeMap[movement.employeeId]?.name} · {movement.note}</p><small>{new Date(movement.date).toLocaleDateString("en-GB")}</small></div></div>) : <p className="muted">No previous movements.</p>}</div>
+            <div className="mini-history">{movements.length ? movements.map((movement) => <div key={movement.id}><i /><div><strong>{movement.type}</strong><p>{movement.employeeName || employeeMap[movement.employeeId]?.name || "Asset Administration"} · {movement.note}</p><small>{new Date(movement.date).toLocaleDateString("en-GB")}</small></div></div>) : <p className="muted">No previous movements.</p>}</div>
           </section>
         </div>
       </aside>
@@ -2145,6 +2220,7 @@ function AssetForm({
   departments,
   locations,
   employees,
+  toners = [],
   onSave,
   initial,
   defaultType,
@@ -2152,6 +2228,7 @@ function AssetForm({
   departments: string[];
   locations: string[];
   employees: Employee[];
+  toners?: TonerStock[];
   onSave: (asset: Asset) => void;
   initial?: Asset;
   defaultType?: string;
@@ -2586,28 +2663,65 @@ function AssetForm({
           <span>Fields change automatically for the selected asset type.</span>
         </div>
       )}
-      {dynamicFields.map((spec) => (
-        <label key={spec.key}>
-          {spec.label}
-          {spec.options ? (
-            <select
-              required={spec.required !== false}
-              value={specs[spec.key] ?? ""}
-              onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })}
-            >
-              <option value="">Select {spec.label.toLowerCase()}</option>
-              {spec.options.map((option) => <option key={option}>{option}</option>)}
-            </select>
-          ) : (
-            <input
-              required={spec.required !== false}
-              value={specs[spec.key] ?? ""}
-              placeholder={spec.placeholder}
-              onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })}
-            />
-          )}
-        </label>
-      ))}
+      {dynamicFields.map((spec) => {
+        const knownTonerModels = spec.key === "compatibleToner"
+          ? Array.from(new Set(toners.map((t) => t.tonerModel.trim()).filter(Boolean))).sort()
+          : [];
+        const isMappedTonerDropdown = spec.key === "compatibleToner" && knownTonerModels.length > 0;
+        const currentCompat = specs[spec.key] ?? "";
+        const isCustomCompat = isMappedTonerDropdown && Boolean(currentCompat) && !knownTonerModels.includes(currentCompat);
+
+        return (
+          <label key={spec.key}>
+            {spec.label}
+            {spec.options ? (
+              <select
+                required={spec.required !== false}
+                value={specs[spec.key] ?? ""}
+                onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })}
+              >
+                <option value="">Select {spec.label.toLowerCase()}</option>
+                {spec.options.map((option) => <option key={option}>{option}</option>)}
+              </select>
+            ) : isMappedTonerDropdown ? (
+              <>
+                <select
+                  required={!isCustomCompat && spec.required !== false}
+                  value={isCustomCompat ? "__custom__" : currentCompat}
+                  onChange={(event) => {
+                    const val = event.target.value;
+                    if (val === "__custom__") {
+                      setSpecs({ ...specs, [spec.key]: currentCompat || " " });
+                    } else {
+                      setSpecs({ ...specs, [spec.key]: val });
+                    }
+                  }}
+                >
+                  <option value="">Select mapped toner from stock…</option>
+                  {knownTonerModels.map((tm) => <option key={tm} value={tm}>{tm}</option>)}
+                  <option value="__custom__">+ Type another toner model…</option>
+                </select>
+                {isCustomCompat && (
+                  <input
+                    required={spec.required !== false}
+                    style={{ marginTop: "6px" }}
+                    value={currentCompat.trimStart()}
+                    placeholder={spec.placeholder}
+                    onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })}
+                  />
+                )}
+              </>
+            ) : (
+              <input
+                required={spec.required !== false}
+                value={specs[spec.key] ?? ""}
+                placeholder={spec.placeholder}
+                onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })}
+              />
+            )}
+          </label>
+        );
+      })}
       <label>Condition<select {...field("condition")}><option>Excellent</option><option>Good</option><option>Fair</option><option>Repair</option></select></label>
       <label>Asset verified (Yes/No)<select {...field("verified")}><option value="No">No</option><option value="Yes">Yes</option></select></label>
       <label className="full">Additional notes<textarea placeholder="Warranty, accessories or any other information…" {...field("details")} /></label>

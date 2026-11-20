@@ -299,6 +299,32 @@ test("uses atomic Firestore transactions, multi-token search, orange repair badg
   assert.match(css, /\.document-condition\.condition-repair/);
 });
 
+test("supports dropdown printer-toner mapping, toner replacement history, zero-buffer orange cards, and Admin Dept requisition report", async () => {
+  const [page, printersView, excelReports, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/PrintersTonersView.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/excelReports.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(printersView, /Mapped printer model/);
+  assert.match(printersView, /Target printer \(mapped by model\)/);
+  assert.match(printersView, /Replaced \/ changed by/);
+  assert.match(printersView, /toner-card-zero/);
+  assert.match(printersView, /zero-stock-banner/);
+  assert.match(printersView, /Download 0-Stock Requisition/);
+  assert.match(page, /Toner Replacement/);
+  assert.match(page, /card-zero-highlight/);
+  assert.match(page, /buildZeroStockTonerRequisitionReport/);
+  assert.match(page, /Select mapped toner from stock/);
+  assert.match(excelReports, /buildZeroStockTonerRequisitionReport/);
+  assert.match(excelReports, /ADMIN DEPT — URGENT ZERO-STOCK TONER REQUISITION/);
+  assert.match(css, /\.card-zero-highlight/);
+  assert.match(css, /\.toner-card-zero/);
+  assert.match(css, /\.zero-stock-banner/);
+});
+
+
 
 
 

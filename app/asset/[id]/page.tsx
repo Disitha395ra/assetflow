@@ -8,6 +8,7 @@ import {
   Cast,
   CheckCircle2,
   Clock3,
+  Droplets,
   History,
   MapPin,
   Monitor,
@@ -124,7 +125,7 @@ export default function PublicAssetPage() {
             <div className="public-timeline">
               {history.length ? [...history].sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date)).map((event) => (
                 <div key={event.id}>
-                  <span>{event.type === "Repair" ? <Wrench size={15} /> : <ArrowLeftRight size={15} />}</span>
+                  <span>{event.type === "Repair" ? <Wrench size={15} /> : event.type === "Toner Replacement" ? <Droplets size={15} /> : <ArrowLeftRight size={15} />}</span>
                   <div><strong>{event.type}</strong><p>{event.employeeName || "Asset Administration"}{event.department ? ` · ${event.department}` : ""}</p><small>{event.note}</small></div>
                   <time>{new Date(event.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</time>
                 </div>

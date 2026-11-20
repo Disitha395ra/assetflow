@@ -147,6 +147,7 @@ button { cursor: pointer; }
 .activity-assigned { background: #ede9ff; color: #6745e5; }
 .activity-returned, .activity-cleared { background: #e9f9f0; color: #188c53; }
 .activity-repair { background: #fff2e4; color: #d87519; }
+.activity-toner-replacement { background: #fff3e5; color: #d97706; }
 .activity-row strong { display: block; font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .activity-row p { margin: 4px 0 0; color: var(--muted); font-size: 9px; }
 .activity-row time { font-size: 9px; color: #9499a4; }
@@ -1196,6 +1197,111 @@ select.status { appearance: none; cursor: pointer; padding-right: 8px; }
 }
 .profile-menu button:hover {
   background: #fff0f0;
+}
+
+/* --- Zero-Stock (0 Buffer) Orange Highlighted Cards & Admin Requisition Banner --- */
+.asset-type-summary > button.card-zero-highlight {
+  border: 1.5px solid #f59e0b;
+  background: linear-gradient(145deg, #fff7ed, #ffedd5);
+  box-shadow: 0 6px 18px rgba(245, 158, 11, .16);
+}
+.asset-type-summary > button.card-zero-highlight:hover {
+  border-color: #d97706;
+  background: linear-gradient(145deg, #ffedd5, #fed7aa);
+}
+.asset-type-summary > button.card-zero-highlight strong {
+  color: #9a3412;
+}
+.asset-type-summary > button.card-zero-highlight span {
+  color: #c2410c;
+}
+.asset-type-summary > button.card-zero-highlight b {
+  color: #ea580c;
+}
+.asset-type-summary > button.card-zero-highlight small {
+  color: #b45309;
+  font-weight: 700;
+}
+
+.metric.metric-zero-highlight {
+  border: 1.5px solid #f59e0b;
+  background: linear-gradient(145deg, #fffaf0, #fff3e0);
+}
+.metric.metric-zero-highlight strong {
+  color: #c2410c;
+}
+
+.toner-group-card.toner-card-zero {
+  border: 1.5px solid #f59e0b;
+  box-shadow: 0 8px 24px rgba(245, 158, 11, .14);
+}
+.toner-group-card.toner-card-zero .toner-group-head {
+  background: linear-gradient(135deg, #fff7ed, #ffedd5);
+  border-bottom-color: #fed7aa;
+}
+.toner-group-card.toner-card-zero .section-kicker {
+  color: #c2410c;
+}
+.toner-row-zero {
+  background: #fff7ed !important;
+}
+.toner-row-zero:hover {
+  background: #ffedd5 !important;
+}
+.toner-row-zero .toner-qty-cell strong {
+  color: #ea580c;
+}
+.toner-drawer-row.toner-drawer-row-zero {
+  border: 1.5px solid #f59e0b;
+  background: #fff7ed;
+}
+
+.zero-stock-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: linear-gradient(135deg, #fff7ed, #ffedd5);
+  border: 1.5px solid #f59e0b;
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 18px;
+  box-shadow: 0 6px 20px rgba(245, 158, 11, .12);
+}
+.zero-stock-banner > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #9a3412;
+}
+.zero-stock-banner strong {
+  display: block;
+  font-size: 11px;
+  color: #9a3412;
+}
+.zero-stock-banner span {
+  display: block;
+  font-size: 8.5px;
+  color: #c2410c;
+  margin-top: 3px;
+}
+
+.button-orange {
+  background: #ea580c;
+  color: white;
+  border-color: #ea580c;
+  box-shadow: 0 5px 14px rgba(234, 88, 12, .24);
+}
+.button-orange:hover {
+  background: #c2410c;
+  border-color: #c2410c;
+}
+
+@media (max-width: 720px) {
+  .zero-stock-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 @media (max-width: 720px) {
