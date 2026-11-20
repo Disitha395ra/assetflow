@@ -117,7 +117,7 @@ export function PrintersTonersView({
   }, [filteredToners]);
 
   const sortedTransactions = useMemo(
-    () => [...transactions].sort((a, b) => b.date.localeCompare(a.date)),
+    () => [...transactions].sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date)),
     [transactions],
   );
 
@@ -519,7 +519,7 @@ export function PrintersTonersView({
                   <tbody>
                     {sortedTransactions.slice(0, 30).map((tx) => (
                       <tr key={tx.id}>
-                        <td>{new Date(tx.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</td>
+                        <td>{tx.date && !Number.isNaN(new Date(tx.date).getTime()) ? new Date(tx.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : tx.date || "—"}</td>
                         <td>
                           <span className={statusClass(tx.type === "Restock" ? "Available" : tx.type === "Issued" ? "Assigned" : "Pending")}>
                             {tx.type}

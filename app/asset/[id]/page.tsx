@@ -21,7 +21,7 @@ import {
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { firebaseReady, getRecord, watchCollection } from "@/lib/firebase";
-import { formatSpecLabel, furnitureImageForAsset, isLocationOnlyAssetType } from "@/lib/catalog";
+import { effectiveAssetStatus, formatSpecLabel, furnitureImageForAsset, isLocationOnlyAssetType } from "@/lib/catalog";
 
 type PublicAsset = {
   id: string;
@@ -50,6 +50,7 @@ type PublicMovement = {
   id: string;
   type: string;
   date: string;
+  createdAt?: string;
   note: string;
   employeeName?: string;
   department?: string;
@@ -96,8 +97,8 @@ export default function PublicAssetPage() {
           <h1>{asset.name}</h1>
           <p>{asset.brand} · {asset.model}</p>
         </div>
-        <span className={`public-status public-status-${(asset.condition === "Repair" && asset.status !== "Retired" ? "In repair" : asset.status).toLowerCase().replaceAll(" ", "-")}`}>
-          {asset.condition === "Repair" && asset.status !== "Retired" ? "In repair" : asset.status}
+        <span className={`public-status public-status-${effectiveAssetStatus(asset).toLowerCase().replaceAll(" ", "-")}`}>
+          {effectiveAssetStatus(asset)}
         </span>
       </section>
 
@@ -121,7 +122,7 @@ export default function PublicAssetPage() {
           <article className="public-card public-history-card">
             <div className="public-card-title"><History size={18} /><div><h2>Lifecycle record</h2><p>Assignment, return and repair history</p></div></div>
             <div className="public-timeline">
-              {history.length ? [...history].sort((a, b) => b.date.localeCompare(a.date)).map((event) => (
+              {history.length ? [...history].sort((a, b) => (b.createdAt || b.date).localeCompare(a.createdAt || a.date)).map((event) => (
                 <div key={event.id}>
                   <span>{event.type === "Repair" ? <Wrench size={15} /> : <ArrowLeftRight size={15} />}</span>
                   <div><strong>{event.type}</strong><p>{event.employeeName || "Asset Administration"}{event.department ? ` · ${event.department}` : ""}</p><small>{event.note}</small></div>

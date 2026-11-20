@@ -1,4 +1,4 @@
-import { getAssetKeySpecChips, isLocationOnlyAssetType, tonerMatchesPrinter } from "@/lib/catalog";
+import { effectiveAssetStatus, getAssetKeySpecChips, isLocationOnlyAssetType, tonerMatchesPrinter } from "@/lib/catalog";
 import type { Asset, Employee, TonerStock, TonerTransaction } from "@/lib/types";
 
 export type StyledColumn = {
@@ -333,10 +333,11 @@ function buildDepartmentSummarySheet(
   for (const asset of items) {
     const dept = getDepartmentForSort(asset, employeeMap) || "Unassigned (Central Stock)";
     const cur = map.get(dept) ?? { assigned: 0, available: 0, repair: 0, verified: 0, total: 0 };
+    const status = effectiveAssetStatus(asset);
     cur.total += 1;
-    if (asset.status === "Assigned") cur.assigned += 1;
-    else if (asset.status === "Available") cur.available += 1;
-    else if (asset.status === "In repair") cur.repair += 1;
+    if (status === "Assigned") cur.assigned += 1;
+    else if (status === "Available") cur.available += 1;
+    else if (status === "In repair") cur.repair += 1;
     if (asset.verified) cur.verified += 1;
     map.set(dept, cur);
   }
@@ -374,9 +375,9 @@ function buildDepartmentSummarySheet(
     footerRow: [
       "",
       "TOTAL",
-      items.filter((a) => a.status === "Assigned").length,
-      items.filter((a) => a.status === "Available").length,
-      items.filter((a) => a.status === "In repair").length,
+      items.filter((a) => effectiveAssetStatus(a) === "Assigned").length,
+      items.filter((a) => effectiveAssetStatus(a) === "Available").length,
+      items.filter((a) => effectiveAssetStatus(a) === "In repair").length,
       items.filter((a) => a.verified).length,
       items.length,
     ],
@@ -423,7 +424,7 @@ export function buildStaffLaptopsReport(
       { value: asset.specs?.eCores || "—", align: "center" },
       { value: asset.specs?.ram || "—", align: "center" },
       { value: storage, align: "center" },
-      { value: asset.status, align: "center", tone: statusTone(asset.status) },
+      { value: effectiveAssetStatus(asset), align: "center", tone: statusTone(effectiveAssetStatus(asset)) },
       verifiedCell(asset.verified),
     ];
   });
@@ -492,7 +493,7 @@ export function buildStaffMonitorsReport(
       { value: asset.specs?.screenSize || "—", align: "center" },
       { value: asset.specs?.resolution || "—", align: "center" },
       { value: asset.specs?.connector || "—", align: "center" },
-      { value: asset.status, align: "center", tone: statusTone(asset.status) },
+      { value: effectiveAssetStatus(asset), align: "center", tone: statusTone(effectiveAssetStatus(asset)) },
       { value: asset.condition, align: "center", tone: statusTone(asset.condition) },
       verifiedCell(asset.verified),
     ];
@@ -595,7 +596,7 @@ export function buildStaffHeadsetsReport(
       { value: asset.model || "—" },
       { value: asset.serial || "—" },
       { value: asset.specs?.connectivity || "—", align: "center" },
-      { value: asset.status, align: "center", tone: statusTone(asset.status) },
+      { value: effectiveAssetStatus(asset), align: "center", tone: statusTone(effectiveAssetStatus(asset)) },
       { value: asset.condition, align: "center", tone: statusTone(asset.condition) },
       verifiedCell(asset.verified),
     ];
@@ -657,7 +658,7 @@ export function buildStaffMousesReport(
       { value: asset.model || "—" },
       { value: asset.serial || "—" },
       { value: asset.specs?.connectivity || "—", align: "center" },
-      { value: asset.status, align: "center", tone: statusTone(asset.status) },
+      { value: effectiveAssetStatus(asset), align: "center", tone: statusTone(effectiveAssetStatus(asset)) },
       { value: asset.condition, align: "center", tone: statusTone(asset.condition) },
       verifiedCell(asset.verified),
     ];

@@ -41,6 +41,7 @@ export type Movement = {
   employeeId: string;
   type: "Assigned" | "Returned" | "Repair" | "Cleared";
   date: string;
+  createdAt?: string;
   note: string;
   employeeName?: string;
   department?: string;
@@ -97,5 +98,6 @@ export type TonerTransaction = {
   department?: string;
   recipientName?: string;
   date: string;
+  createdAt?: string;
   note: string;
 };

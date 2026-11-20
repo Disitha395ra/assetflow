@@ -106,23 +106,114 @@ export function watchCollection<T extends { id: string }>(
   );
 }
 
+function stripUndefined<T>(item: T): T {
+  if (Array.isArray(item)) return item.map(stripUndefined) as T;
+  if (item && typeof item === "object") {
+    return Object.fromEntries(
+      Object.entries(item as Record<string, unknown>)
+        .filter(([, entry]) => entry !== undefined)
+        .map(([key, entry]) => [key, stripUndefined(entry)]),
+    ) as T;
+  }
+  return item;
+}
+
 export async function saveRecord<T extends { id: string }>(
   name: string,
   value: T,
 ) {
   if (!db) return;
-  const withoutUndefined = (item: unknown): unknown => {
-    if (Array.isArray(item)) return item.map(withoutUndefined);
-    if (item && typeof item === "object") {
-      return Object.fromEntries(
-        Object.entries(item)
-          .filter(([, entry]) => entry !== undefined)
-          .map(([key, entry]) => [key, withoutUndefined(entry)]),
+  await setDoc(doc(db, name, value.id), stripUndefined(value));
+}
+
+export async function commitAssetMovementsBatch(
+  items: {
+    asset: { id: string; [key: string]: unknown };
+    movement: { id: string; assetId: string; type: string; date: string; createdAt?: string; note: string; employeeId: string; employeeName?: string; department?: string };
+  }[],
+) {
+  if (!db || !items.length) return;
+  // Each item writes 3 docs (asset + movement + asset/history); keep each batch well below Firestore's 500-op limit
+  const CHUNK_SIZE = 150;
+  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    const batch = writeBatch(db);
+    for (const { asset, movement } of items.slice(i, i + CHUNK_SIZE)) {
+      batch.set(doc(db, "assets", asset.id), stripUndefined(asset));
+      batch.set(doc(db, "movements", movement.id), stripUndefined(movement));
+      batch.set(
+        doc(db, "assets", movement.assetId, "history", movement.id),
+        stripUndefined({
+          id: movement.id,
+          type: movement.type,
+          date: movement.date,
+          createdAt: movement.createdAt,
+          note: movement.note,
+          employeeName: movement.employeeName ?? "Asset Administration",
+          department: movement.department ?? "Central Stock",
+        }),
       );
     }
-    return item;
-  };
-  await setDoc(doc(db, name, value.id), withoutUndefined(value));
+    await batch.commit();
+  }
+}
+
+export async function syncEmployeeCustodianOnAssets(
+  employee: { id: string; name: string; department: string },
+  assignedAssets: { id: string; [key: string]: unknown }[],
+) {
+  if (!db || !assignedAssets.length) return;
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < assignedAssets.length; i += CHUNK_SIZE) {
+    const batch = writeBatch(db);
+    for (const asset of assignedAssets.slice(i, i + CHUNK_SIZE)) {
+      batch.set(
+        doc(db, "assets", asset.id),
+        stripUndefined({
+          ...asset,
+          custodianName: employee.name,
+          custodianDepartment: employee.department,
+        }),
+      );
+    }
+    await batch.commit();
+  }
+}
+
+export async function applyTonerStockTransaction<
+  TToner extends { id: string; quantity: number; updatedAt: string },
+  TTx extends { id: string; resultingStock: number },
+>(
+  tonerFallback: TToner,
+  mode: "Restock" | "Issued",
+  quantity: number,
+  buildTransaction: (resultingStock: number) => TTx,
+): Promise<{ updatedToner: TToner; transaction: TTx }> {
+  const safeQty = Math.floor(Math.max(1, quantity));
+  if (!db) {
+    const nextQty = mode === "Restock"
+      ? tonerFallback.quantity + safeQty
+      : Math.max(0, tonerFallback.quantity - safeQty);
+    const updatedToner = { ...tonerFallback, quantity: nextQty };
+    const transaction = buildTransaction(nextQty);
+    return { updatedToner, transaction };
+  }
+
+  return runTransaction(db, async (tx) => {
+    const tonerRef = doc(db, "toners", tonerFallback.id);
+    const snap = await tx.get(tonerRef);
+    const current = snap.exists() ? (snap.data() as TToner) : tonerFallback;
+    if (mode === "Issued" && safeQty > current.quantity) {
+      throw new Error(`Insufficient stock: only ${current.quantity} unit(s) remaining.`);
+    }
+    const nextQty = mode === "Restock"
+      ? current.quantity + safeQty
+      : Math.max(0, current.quantity - safeQty);
+    const updatedToner: TToner = { ...current, quantity: nextQty, updatedAt: tonerFallback.updatedAt };
+    const transaction = buildTransaction(nextQty);
+    tx.set(tonerRef, stripUndefined(updatedToner));
+    tx.set(doc(db, "tonerTransactions", transaction.id), stripUndefined(transaction));
+    return { updatedToner, transaction };
+  });
 }
 
 export async function removeRecord(name: string, id: string) {
@@ -237,11 +328,19 @@ export function watchRequirementWindow(callback: (value: RequirementWindowRecord
       value instanceof Timestamp
         ? value.toDate().toISOString().slice(0, 16)
         : String(value ?? "");
+    const cleanList = (value: unknown) =>
+      Array.isArray(value)
+        ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
+        : [];
+    const departments = cleanList(data.departments);
+    const locations = cleanList(data.locations);
     callback({
       ...data,
       id: "requirement-window",
       opensAt: toInputDate(data.opensAt),
       closesAt: toInputDate(data.closesAt),
+      ...(departments.length ? { departments } : {}),
+      ...(locations.length ? { locations } : {}),
     } as RequirementWindowRecord);
   });
 }

@@ -291,3 +291,19 @@ export function tonerMatchesPrinter(
   }
   return false;
 }
+
+export function effectiveAssetStatus(asset: { status: string; condition?: string }): string {
+  if (asset.condition === "Repair" && asset.status !== "Retired") {
+    return "In repair";
+  }
+  return asset.status;
+}
+
+export function matchesSearchQuery(query: string, fields: (string | undefined | null)[]): boolean {
+  const trimmed = query.trim().toLowerCase();
+  if (!trimmed) return true;
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  if (!tokens.length) return true;
+  const haystack = fields.filter(Boolean).join(" ").toLowerCase();
+  return tokens.every((token) => haystack.includes(token));
+}
