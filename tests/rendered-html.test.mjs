@@ -180,3 +180,101 @@ test("supports employee email confirmation on asset returns and clearance", asyn
   assert.match(returnApiRoute, /Discharge of Custody/);
 });
 
+test("supports Laptop P-Cores and E-Cores dropdowns and displays them across asset views", async () => {
+  const [catalog, page, publicAssetPage] = await Promise.all([
+    readFile(new URL("../lib/catalog.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/asset/[id]/page.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(catalog, /key: "pCores"/);
+  assert.match(catalog, /label: "No\. of P-Cores"/);
+  assert.match(catalog, /key: "eCores"/);
+  assert.match(catalog, /label: "No\. of E-Cores"/);
+  assert.match(catalog, /getAssetKeySpecChips/);
+  assert.match(catalog, /formatSpecLabel/);
+  assert.match(page, /getAssetKeySpecChips\(asset\)/);
+  assert.match(page, /"No\. of P-Cores"/);
+  assert.match(page, /"No\. of E-Cores"/);
+  assert.match(publicAssetPage, /formatSpecLabel\(key\)/);
+});
+
+test("divides monitors into Staff vs Classroom/Location monitors and adds location-allocated Google Chromecast", async () => {
+  const [catalog, page, publicAssetPage] = await Promise.all([
+    readFile(new URL("../lib/catalog.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/asset/[id]/page.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(catalog, /"Classroom \/ Location Monitor"/);
+  assert.match(catalog, /"Google Chromecast"/);
+  assert.match(catalog, /LOCATION_ONLY_ASSET_TYPES/);
+  assert.match(catalog, /DEFAULT_LOCATIONS/);
+  assert.match(catalog, /Building 1 \(Main\) - Mechatronics Lab/);
+  assert.match(catalog, /Building 2 \(New\) - Classroom 301/);
+  assert.match(catalog, /groupLocationsByBuilding/);
+  assert.match(page, /Monitor division \(2 parts\)/);
+  assert.match(page, /Staff \/ Employee Monitor/);
+  assert.match(page, /Classroom \/ Location Monitor/);
+  assert.match(page, /Location-allocated IT asset \(not assigned to a person\)/);
+  assert.match(page, /!isLocationOnlyAssetType\(asset\.type\)/);
+  assert.match(page, /Manage locations/);
+  assert.match(publicAssetPage, /Allocated to classroom \/ location/);
+});
+
+test("supports Printer IT asset with department/person assignment and model-based Toner stock management", async () => {
+  const [catalog, page, printersView, rules] = await Promise.all([
+    readFile(new URL("../lib/catalog.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/PrintersTonersView.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../firestore.rules", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(catalog, /"Printer"/);
+  assert.match(catalog, /compatibleToner/);
+  assert.match(catalog, /TONER_COLORS/);
+  assert.match(catalog, /tonerMatchesPrinter/);
+  assert.match(page, /Printers & Toners/);
+  assert.match(page, /Printer assignment/);
+  assert.match(page, /Compatible toner stock \(Subsection\)/);
+  assert.match(page, /watchCollection<TonerStock>\("toners"/);
+  assert.match(page, /watchCollection<TonerTransaction>\("tonerTransactions"/);
+  assert.match(printersView, /Toner stock \(Subsection\)/);
+  assert.match(printersView, /TonerForm/);
+  assert.match(printersView, /TonerStockActionForm/);
+  assert.match(printersView, /Toner stock movement history/);
+  assert.match(rules, /match \/toners\/\{tonerId\}/);
+  assert.match(rules, /match \/tonerTransactions\/\{transactionId\}/);
+});
+
+test("generates 6 dedicated styled Excel reports sorted A-Z by department with required laptop columns", async () => {
+  const [page, excelReports, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/excelReports.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /All Staff Laptops/);
+  assert.match(page, /All Staff Monitors/);
+  assert.match(page, /All Staff Headsets/);
+  assert.match(page, /All Staff Mouses/);
+  assert.match(page, /Employee IT Assets Details/);
+  assert.match(page, /Printer & Toner Details/);
+  assert.match(page, /Asset verified \(Yes\/No\)/);
+  assert.match(excelReports, /buildStaffLaptopsReport/);
+  assert.match(excelReports, /buildStaffMonitorsReport/);
+  assert.match(excelReports, /buildStaffHeadsetsReport/);
+  assert.match(excelReports, /buildStaffMousesReport/);
+  assert.match(excelReports, /buildEmployeeItAssetsReport/);
+  assert.match(excelReports, /buildPrinterAndTonerReport/);
+  assert.match(excelReports, /sortAssetsByDepartmentAZ/);
+  assert.match(excelReports, /Laptop Processor/);
+  assert.match(excelReports, /No\. of P-Cores/);
+  assert.match(excelReports, /No\. of E-Cores/);
+  assert.match(excelReports, /Asset Verified \(Yes\/No\)/);
+  assert.match(excelReports, /buildStyledWorkbookFiles/);
+  assert.match(css, /\.structured-report-card/);
+});
+
+
+

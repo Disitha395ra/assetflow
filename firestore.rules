@@ -46,6 +46,16 @@ service cloud.firestore {
       allow create, update, delete: if isAdmin();
     }
 
+    match /toners/{tonerId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /tonerTransactions/{transactionId} {
+      allow read: if request.auth != null;
+      allow create, update, delete: if isAdmin();
+    }
+
     match /settings/requirement-window {
       allow get: if true;
       allow write: if isAdmin();

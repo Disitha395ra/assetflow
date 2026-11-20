@@ -3,26 +3,34 @@
 /* eslint-disable @next/next/no-img-element -- QR labels use generated data URLs. */
 
 import {
+  AlertTriangle,
   ArrowDownToLine,
   ArrowLeftRight,
   Bell,
   Building2,
   CalendarClock,
+  Cast,
   Check,
+  CheckCircle2,
   ChevronDown,
   CircleDot,
   ClipboardCheck,
   Copy,
   Download,
+  Droplets,
   ExternalLink,
   FileSpreadsheet,
+  Headphones,
   History,
+  Laptop,
   LayoutDashboard,
   LockKeyhole,
   LogOut,
   Mail,
+  MapPin,
   Menu,
   Monitor,
+  Mouse,
   Package,
   Pencil,
   Plus,
@@ -56,63 +64,52 @@ import {
   watchCollection,
   type RequirementWindowRecord,
 } from "@/lib/firebase";
-import { ASSET_SPEC_FIELDS, ASSET_TYPES, DEFAULT_DEPARTMENTS, FURNITURE_IMAGE_OPTIONS, furnitureImageForAsset } from "@/lib/catalog";
+import {
+  ASSET_SPEC_FIELDS,
+  ASSET_TYPES,
+  DEFAULT_DEPARTMENTS,
+  DEFAULT_LOCATIONS,
+  FURNITURE_IMAGE_OPTIONS,
+  formatSpecLabel,
+  furnitureImageForAsset,
+  getAssetKeySpecChips,
+  groupLocationsByBuilding,
+  isLocationOnlyAssetType,
+  isMonitorAssetType,
+  isPrinterAssetType,
+  tonerMatchesPrinter,
+} from "@/lib/catalog";
+import {
+  LocationManager,
+  PrintersTonersView,
+  TonerForm,
+  TonerStockActionForm,
+  tonerStockStatus,
+} from "@/components/PrintersTonersView";
+import {
+  buildEmployeeItAssetsReport,
+  buildPrinterAndTonerReport,
+  buildStaffHeadsetsReport,
+  buildStaffLaptopsReport,
+  buildStaffMonitorsReport,
+  buildStaffMousesReport,
+  downloadStyledWorkbook,
+} from "@/lib/excelReports";
+import type {
+  Asset,
+  AssetAllocationType,
+  AssetStatus,
+  Employee,
+  Movement,
+  RequestRow,
+  TonerStock,
+  TonerTransaction,
+} from "@/lib/types";
 
-type AssetStatus = "Available" | "Assigned" | "In repair" | "Retired";
-type Asset = {
-  id: string;
-  code: string;
-  name: string;
-  category: "IT Asset" | "Non-IT Asset";
-  type: string;
-  brand: string;
-  model: string;
-  serial: string;
-  location?: string;
-  status: AssetStatus;
-  employeeId?: string;
-  condition: string;
-  details: string;
-  specs?: Record<string, string>;
-  updatedAt: string;
-  custodianName?: string;
-  custodianDepartment?: string;
-  imageKey?: string;
-};
-type Employee = {
-  id: string;
-  empNo: string;
-  name: string;
-  email: string;
-  department: string;
-  designation: string;
-  status: "Active" | "Resigned";
-};
-type Movement = {
-  id: string;
-  assetId: string;
-  employeeId: string;
-  type: "Assigned" | "Returned" | "Repair" | "Cleared";
-  date: string;
-  note: string;
-  employeeName?: string;
-  department?: string;
-};
-type RequestRow = {
-  id: string;
-  department: string;
-  item: string;
-  quantity: number;
-  neededDate: string;
-  reason: string;
-  status: "Pending" | "Approved" | "Declined";
-  requesterName?: string;
-  requesterEmail?: string;
-  createdAt?: string;
-};
 type View =
   | "Dashboard"
   | "Assets"
+  | "Printers & Toners"
   | "Employees"
   | "Movements"
   | "Requirements"
@@ -121,6 +118,7 @@ type View =
 const nav = [
   { name: "Dashboard" as View, icon: LayoutDashboard },
   { name: "Assets" as View, icon: Package },
+  { name: "Printers & Toners" as View, icon: Printer },
   { name: "Employees" as View, icon: Users },
   { name: "Movements" as View, icon: ArrowLeftRight },
   { name: "Requirements" as View, icon: CalendarClock },
@@ -140,7 +138,15 @@ function statusClass(status: string) {
 }
 
 function specLabel(key: string) {
-  return key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase());
+  return formatSpecLabel(key);
+}
+
+function assetTypeIcon(type: string, size = 18) {
+  if (type === "Laptop") return <Laptop size={size} />;
+  if (type === "Printer") return <Printer size={size} />;
+  if (type === "Google Chromecast") return <Cast size={size} />;
+  if (type === "Mobile Phone") return <Smartphone size={size} />;
+  return <Monitor size={size} />;
 }
 
 export default function Home() {
@@ -149,7 +155,10 @@ export default function Home() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
   const [requests, setRequests] = useState<RequestRow[]>([]);
+  const [toners, setToners] = useState<TonerStock[]>([]);
+  const [tonerTransactions, setTonerTransactions] = useState<TonerTransaction[]>([]);
   const [departments, setDepartments] = useState<string[]>(DEFAULT_DEPARTMENTS);
+  const [locations, setLocations] = useState<string[]>(DEFAULT_LOCATIONS);
   const [adminState, setAdminState] = useState<"loading" | "signed-out" | "admin" | "denied">(
     firebaseReady ? "loading" : "admin",
   );
@@ -159,10 +168,15 @@ export default function Home() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
   const [department, setDepartment] = useState("All");
+  const [printersSubTab, setPrintersSubTab] = useState<"Printers" | "Toner Stock">("Printers");
+  const [presetAssetType, setPresetAssetType] = useState<string | undefined>(undefined);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  const [editingToner, setEditingToner] = useState<TonerStock | null>(null);
+  const [presetTonerModel, setPresetTonerModel] = useState<{ model: string; brand?: string; compatibleToner?: string } | null>(null);
+  const [tonerAction, setTonerAction] = useState<{ toner: TonerStock; mode: "Restock" | "Issued"; presetPrinterId?: string } | null>(null);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
-  const [modal, setModal] = useState<"asset" | "employee" | "employeeEdit" | "departments" | "assign" | "return" | "repair" | "request" | "document" | "qrBatch" | "schedule" | null>(null);
+  const [modal, setModal] = useState<"asset" | "employee" | "employeeEdit" | "departments" | "locations" | "toner" | "tonerStock" | "assign" | "return" | "repair" | "request" | "document" | "qrBatch" | "schedule" | null>(null);
   const [documentType, setDocumentType] = useState("Asset Handover");
   const [documentEmployeeId, setDocumentEmployeeId] = useState("");
   const [documentAssetIds, setDocumentAssetIds] = useState<string[]>([]);
@@ -192,11 +206,14 @@ export default function Home() {
       watchCollection<Employee>("employees", setEmployees, handleCollectionError("employees")),
       watchCollection<Movement>("movements", setMovements, handleCollectionError("movements")),
       watchCollection<RequestRow>("requirements", setRequests, handleCollectionError("requirements")),
+      watchCollection<TonerStock>("toners", setToners, handleCollectionError("toners")),
+      watchCollection<TonerTransaction>("tonerTransactions", setTonerTransactions, handleCollectionError("tonerTransactions")),
     ];
     getRequirementWindow().then((config) => {
       if (!config) return;
       setRequirementWindow(config);
       if (config.departments?.length) setDepartments(config.departments);
+      if (config.locations?.length) setLocations(config.locations);
     });
     return () => cleanups.forEach((cleanup) => cleanup());
   }, [adminState]);
@@ -214,7 +231,19 @@ export default function Home() {
     const needle = search.toLowerCase();
     return (
       (category === "All" || asset.category === category) &&
-      [asset.code, asset.name, asset.serial, asset.location, asset.brand, asset.type]
+      [
+        asset.code,
+        asset.name,
+        asset.serial,
+        asset.location,
+        asset.brand,
+        asset.model,
+        asset.type,
+        asset.assignedDepartment,
+        asset.custodianName,
+        asset.specs?.processor,
+        asset.specs?.compatibleToner,
+      ]
         .join(" ")
         .toLowerCase()
         .includes(needle)
@@ -232,9 +261,101 @@ export default function Home() {
     );
   });
 
+  const printerAssets = useMemo(() => {
+    const needle = search.toLowerCase();
+    return assets.filter((asset) => {
+      if (!isPrinterAssetType(asset.type)) return false;
+      if (!needle) return true;
+      return [
+        asset.code,
+        asset.name,
+        asset.brand,
+        asset.model,
+        asset.serial,
+        asset.location,
+        asset.assignedDepartment,
+        asset.custodianName,
+        asset.specs?.compatibleToner,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [assets, search]);
+
+  const filteredToners = useMemo(() => {
+    const needle = search.toLowerCase();
+    if (!needle) return toners;
+    return toners.filter((t) =>
+      [t.printerModel, t.printerBrand, t.tonerModel, t.color, t.storageLocation, t.notes]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [toners, search]);
+
   function flash(message: string) {
     setToast(message);
     window.setTimeout(() => setToast(""), 2800);
+  }
+
+  async function saveToner(toner: TonerStock) {
+    const exists = toners.some((row) => row.id === toner.id);
+    setToners((rows) => exists ? rows.map((row) => (row.id === toner.id ? toner : row)) : [toner, ...rows]);
+    await saveRecord("toners", toner);
+    setEditingToner(null);
+    setPresetTonerModel(null);
+    setModal(null);
+    flash(exists ? "Toner SKU updated" : `Toner ${toner.tonerModel} added for ${toner.printerModel}`);
+  }
+
+  async function deleteToner(toner: TonerStock) {
+    setToners((rows) => rows.filter((row) => row.id !== toner.id));
+    await removeRecord("toners", toner.id);
+    flash(`${toner.tonerModel} removed from toner stock`);
+  }
+
+  async function handleTonerStockAction(
+    toner: TonerStock,
+    mode: "Restock" | "Issued",
+    payload: {
+      quantity: number;
+      printerAssetId?: string;
+      printerName?: string;
+      department?: string;
+      recipientName?: string;
+      note: string;
+    },
+  ) {
+    const nextQty = mode === "Restock" ? toner.quantity + payload.quantity : Math.max(0, toner.quantity - payload.quantity);
+    const updatedToner: TonerStock = { ...toner, quantity: nextQty, updatedAt: today() };
+    const transaction: TonerTransaction = {
+      id: crypto.randomUUID(),
+      tonerId: toner.id,
+      printerModel: toner.printerModel,
+      tonerModel: toner.tonerModel,
+      color: toner.color,
+      type: mode,
+      quantity: payload.quantity,
+      resultingStock: nextQty,
+      printerAssetId: payload.printerAssetId,
+      printerName: payload.printerName,
+      department: payload.department,
+      recipientName: payload.recipientName,
+      date: today(),
+      note: payload.note,
+    };
+    setToners((rows) => rows.map((row) => (row.id === updatedToner.id ? updatedToner : row)));
+    setTonerTransactions((rows) => [transaction, ...rows]);
+    await saveRecord("toners", updatedToner);
+    await saveRecord("tonerTransactions", transaction);
+    setTonerAction(null);
+    setModal(null);
+    flash(
+      mode === "Restock"
+        ? `Added +${payload.quantity} ${toner.tonerModel} (${nextQty} in stock)`
+        : `Issued ${payload.quantity} ${toner.tonerModel}${payload.department ? ` to ${payload.department}` : ""} (${nextQty} left)`,
+    );
   }
 
   async function updateAsset(asset: Asset) {
@@ -303,7 +424,7 @@ export default function Home() {
     return { employees: employeeIds.size, assets: assetIds.size, movements: movementIds.size, requirements: requestIds.size };
   }
 
-  async function exportWorkbook(exportAssets?: Asset[] | any) {
+  async function exportWorkbook(exportAssets?: Asset[] | unknown) {
     const listToExport = Array.isArray(exportAssets) ? exportAssets : assets;
     const XLSX = await import("xlsx");
     const { strFromU8, strToU8, unzipSync, zipSync } = await import("fflate");
@@ -317,12 +438,19 @@ export default function Home() {
       Brand: asset.brand,
       Model: asset.model,
       "Serial Number": asset.serial,
-      "Current Location": asset.location || asset.custodianDepartment || "",
+      "Allocation Mode":
+        asset.employeeId ? "Employee" :
+        asset.allocationType === "department" ? "Department" :
+        asset.allocationType === "location" || isLocationOnlyAssetType(asset.type) ? "Classroom / Location" :
+        "Stock",
+      "Current Location": asset.location || asset.assignedDepartment || asset.custodianDepartment || "",
       Status: asset.status,
       "Assigned Employee": asset.employeeId ? employeeMap[asset.employeeId]?.name : "",
-      Department: asset.employeeId ? employeeMap[asset.employeeId]?.department : "",
+      Department: asset.employeeId ? employeeMap[asset.employeeId]?.department : (asset.assignedDepartment || ""),
+      "No. of P-Cores": asset.specs?.pCores ?? "",
+      "No. of E-Cores": asset.specs?.eCores ?? "",
       Condition: asset.condition,
-      Specifications: Object.entries(asset.specs ?? {}).map(([key, value]) => `${specLabel(key)}: ${value}`).join("; "),
+      Specifications: Object.entries(asset.specs ?? {}).filter(([, value]) => value).map(([key, value]) => `${specLabel(key)}: ${value}`).join("; "),
       Details: asset.details,
     }));
     const employeeRows = employees.map((employee) => ({
@@ -334,10 +462,28 @@ export default function Home() {
       Status: employee.status,
       "Assigned Items": assets.filter((asset) => asset.employeeId === employee.id).length,
     }));
+    const tonerRows = toners.map((toner) => ({
+      "Printer Brand": toner.printerBrand || "",
+      "Printer Model": toner.printerModel,
+      "Toner Model": toner.tonerModel,
+      Color: toner.color,
+      "Current Stock": toner.quantity,
+      "Min Alert": toner.minStock,
+      Status: tonerStockStatus(toner),
+      "Storage Location": toner.storageLocation || "Central IT Store",
+      Notes: toner.notes || "",
+      "Last Updated": toner.updatedAt,
+    }));
     const assetSheet = XLSX.utils.json_to_sheet(assetRows);
-    assetSheet["!cols"] = [{ wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 16 }, { wch: 18 }];
+    assetSheet["!cols"] = [{ wch: 20 }, { wch: 16 }, { wch: 14 }, { wch: 22 }, { wch: 28 }, { wch: 16 }, { wch: 18 }];
     assetSheet["!rows"] = [{ hpt: 24 }, ...listToExport.map((asset) => furnitureImageForAsset(asset) ? { hpt: 68 } : { hpt: 20 })];
     XLSX.utils.book_append_sheet(workbook, assetSheet, "Current Assets");
+    if (tonerRows.length) {
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(tonerRows), "Toner Stock");
+    }
+    if (tonerTransactions.length) {
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(tonerTransactions), "Toner History");
+    }
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(employeeRows), "Employees");
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(requests), "Requirements");
     const imageRows = listToExport.map((asset, index) => ({ index, option: furnitureImageForAsset(asset) })).filter((item): item is { index: number; option: NonNullable<ReturnType<typeof furnitureImageForAsset>> } => Boolean(item.option));
@@ -388,6 +534,7 @@ export default function Home() {
   }
 
   const pendingRequirements = requests.filter((request) => request.status === "Pending").length;
+  const lowStockToners = toners.filter((toner) => toner.quantity <= toner.minStock).length;
   const healthyAssets = assets.filter((asset) => asset.status !== "In repair" && asset.status !== "Retired").length;
   const inventoryHealth = assets.length ? Math.round((healthyAssets / assets.length) * 100) : 100;
 
@@ -427,10 +574,12 @@ export default function Home() {
             >
               <Icon size={19} />{name}
               {name === "Requirements" && pendingRequirements > 0 && <span className="nav-count">{pendingRequirements}</span>}
+              {name === "Printers & Toners" && lowStockToners > 0 && <span className="nav-count">{lowStockToners}</span>}
             </button>
           ))}
           <p className="nav-label second">MANAGEMENT</p>
           <button className="nav-item" onClick={() => setModal("departments")}><Building2 size={19} />Manage departments</button>
+          <button className="nav-item" onClick={() => setModal("locations")}><MapPin size={19} />Manage locations</button>
           <button className="nav-item" onClick={() => { setView("Requirements"); setModal("schedule"); }}><Settings size={19} />Requirement settings</button>
         </nav>
         <div className="sidebar-foot">
@@ -443,7 +592,7 @@ export default function Home() {
       <section className="workspace">
         <header className="topbar">
           <button className="icon-button menu-button" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Menu size={21} /></button>
-          <div className="global-search"><Search size={19} /><input aria-label="Search assets and employees" placeholder="Search assets, people or serial numbers…" value={search} onChange={(event) => setSearch(event.target.value)} /><kbd>⌘ K</kbd></div>
+          <div className="global-search"><Search size={19} /><input aria-label="Search assets and employees" placeholder="Search assets, people, locations or toners…" value={search} onChange={(event) => setSearch(event.target.value)} /><kbd>⌘ K</kbd></div>
           <div className="top-actions">
             <span className={firebaseReady ? "sync-pill live" : "sync-pill"}><CircleDot size={13} />{firebaseReady ? "Firebase live" : "Demo workspace"}</span>
             <button className="icon-button"><Bell size={19} /><i /></button>
@@ -459,10 +608,12 @@ export default function Home() {
               departments={departments}
               requests={requests}
               movements={movements}
+              toners={toners}
               employeeMap={employeeMap}
               assetMap={assetMap}
               onView={setView}
-              onAddAsset={() => setModal("asset")}
+              onOpenToners={() => { setPrintersSubTab("Toner Stock"); setView("Printers & Toners"); }}
+              onAddAsset={() => { setEditingAsset(null); setPresetAssetType(undefined); setModal("asset"); }}
               onAssign={() => setModal("assign")}
               onReturn={() => setModal("return")}
               onRequest={() => setModal("request")}
@@ -472,14 +623,36 @@ export default function Home() {
           {view === "Assets" && (
             <AssetsView
               assets={filteredAssets}
+              toners={toners}
               employeeMap={employeeMap}
               category={category}
               setCategory={setCategory}
               departments={departments}
-              onAdd={() => setModal("asset")}
+              locations={locations}
+              onAdd={(defaultType) => { setEditingAsset(null); setPresetAssetType(defaultType); setModal("asset"); }}
               onAsset={setSelectedAsset}
               onExport={exportWorkbook}
               onQrBatch={() => setModal("qrBatch")}
+              onOpenToners={() => { setPrintersSubTab("Toner Stock"); setView("Printers & Toners"); }}
+              onAddToner={(preset) => { setEditingToner(null); setPresetTonerModel(preset ?? null); setModal("toner"); }}
+              onTonerStockAction={(toner, mode, printerId) => { setTonerAction({ toner, mode, presetPrinterId: printerId }); setModal("tonerStock"); }}
+            />
+          )}
+          {view === "Printers & Toners" && (
+            <PrintersTonersView
+              key={printersSubTab}
+              printers={printerAssets}
+              toners={filteredToners}
+              transactions={tonerTransactions}
+              employeeMap={employeeMap}
+              initialSubTab={printersSubTab}
+              onAddPrinter={() => { setEditingAsset(null); setPresetAssetType("Printer"); setModal("asset"); }}
+              onAsset={setSelectedAsset}
+              onAddToner={(preset) => { setEditingToner(null); setPresetTonerModel(preset ?? null); setModal("toner"); }}
+              onEditToner={(toner) => { setEditingToner(toner); setPresetTonerModel(null); setModal("toner"); }}
+              onDeleteToner={deleteToner}
+              onStockAction={(toner, mode, presetPrinterId) => { setTonerAction({ toner, mode, presetPrinterId }); setModal("tonerStock"); }}
+              onExport={() => exportWorkbook(printerAssets)}
             />
           )}
           {view === "Employees" && (
@@ -501,18 +674,99 @@ export default function Home() {
             <RequirementsView requests={requests} setRequests={setRequests} windowConfig={requirementWindow} setWindowConfig={setRequirementWindow} onSchedule={() => setModal("schedule")} onAdd={() => setModal("request")} onExport={exportWorkbook} />
           )}
           {view === "Reports" && (
-            <ReportsView assets={assets} employees={employees} requests={requests} onExport={exportWorkbook} onDocument={openDocument} />
+            <ReportsView
+              assets={assets}
+              employees={employees}
+              employeeMap={employeeMap}
+              toners={toners}
+              tonerTransactions={tonerTransactions}
+              requests={requests}
+              onExport={exportWorkbook}
+              onDocument={openDocument}
+              onDownloadStructuredReport={async (reportId) => {
+                const reportMap = {
+                  laptops: () => buildStaffLaptopsReport(assets, employeeMap),
+                  monitors: () => buildStaffMonitorsReport(assets, employeeMap),
+                  headsets: () => buildStaffHeadsetsReport(assets, employeeMap),
+                  mouses: () => buildStaffMousesReport(assets, employeeMap),
+                  employeeIt: () => buildEmployeeItAssetsReport(assets, employees, employeeMap),
+                  printersToners: () => buildPrinterAndTonerReport(assets, toners, tonerTransactions, employeeMap),
+                } as const;
+                const { sheets, filename } = reportMap[reportId]();
+                await downloadStyledWorkbook(sheets, filename);
+                flash(`${filename} downloaded`);
+              }}
+            />
           )}
         </div>
       </section>
 
-      {selectedAsset && <AssetDrawer asset={selectedAsset} employee={selectedAsset.employeeId ? employeeMap[selectedAsset.employeeId] : undefined} movements={movements.filter((row) => row.assetId === selectedAsset.id)} employeeMap={employeeMap} onClose={() => setSelectedAsset(null)} onEdit={() => { setEditingAsset(selectedAsset); setSelectedAsset(null); setModal("asset"); }} onDelete={() => { if (window.confirm(`Delete ${selectedAsset.name} (${selectedAsset.code}) and its lifecycle history? This cannot be undone.`)) void deleteAsset(selectedAsset); }} />}
+      {selectedAsset && (
+        <AssetDrawer
+          asset={selectedAsset}
+          employee={selectedAsset.employeeId ? employeeMap[selectedAsset.employeeId] : undefined}
+          movements={movements.filter((row) => row.assetId === selectedAsset.id)}
+          employeeMap={employeeMap}
+          toners={toners}
+          onClose={() => setSelectedAsset(null)}
+          onEdit={() => { setEditingAsset(selectedAsset); setPresetAssetType(undefined); setSelectedAsset(null); setModal("asset"); }}
+          onToggleVerified={async () => {
+            const nextAsset: Asset = { ...selectedAsset, verified: !selectedAsset.verified, updatedAt: today() };
+            setSelectedAsset(nextAsset);
+            await updateAsset(nextAsset);
+            flash(nextAsset.verified ? `${nextAsset.name} marked as Verified (Yes)` : `${nextAsset.name} marked as Not Verified (No)`);
+          }}
+          onDelete={() => { if (window.confirm(`Delete ${selectedAsset.name} (${selectedAsset.code}) and its lifecycle history? This cannot be undone.`)) void deleteAsset(selectedAsset); }}
+          onAddToner={(preset) => { setSelectedAsset(null); setEditingToner(null); setPresetTonerModel(preset); setModal("toner"); }}
+          onTonerStockAction={(toner, mode, printerId) => { setSelectedAsset(null); setTonerAction({ toner, mode, presetPrinterId: printerId }); setModal("tonerStock"); }}
+        />
+      )}
       {modal && (
-        <Modal title={modalTitle(modal)} wide={modal === "document"} onClose={() => setModal(null)}>
-          {modal === "asset" && <AssetForm departments={departments} initial={editingAsset ?? undefined} onSave={async (asset) => { setAssets((rows) => editingAsset ? rows.map((row) => row.id === asset.id ? asset : row) : [asset, ...rows]); await saveRecord("assets", asset); setEditingAsset(null); setModal(null); flash(editingAsset ? "Asset details updated" : "Asset added to inventory"); }} />}
+        <Modal
+          title={modal === "asset" && editingAsset ? "Edit asset" : modal === "toner" && editingToner ? "Edit toner SKU" : modal === "tonerStock" && tonerAction ? (tonerAction.mode === "Restock" ? "Restock toner" : "Issue toner") : modalTitle(modal)}
+          wide={modal === "document"}
+          onClose={() => { setModal(null); setEditingAsset(null); setEditingToner(null); setPresetAssetType(undefined); setPresetTonerModel(null); setTonerAction(null); }}
+        >
+          {modal === "asset" && (
+            <AssetForm
+              departments={departments}
+              locations={locations}
+              employees={employees}
+              initial={editingAsset ?? undefined}
+              defaultType={presetAssetType}
+              onSave={async (asset) => {
+                setAssets((rows) => editingAsset ? rows.map((row) => row.id === asset.id ? asset : row) : [asset, ...rows]);
+                await saveRecord("assets", asset);
+                if (asset.location && asset.location !== "Central Stock" && !locations.includes(asset.location) && !departments.includes(asset.location)) {
+                  const nextLocations = [...locations, asset.location];
+                  const nextWindow = { ...requirementWindow, locations: nextLocations };
+                  setLocations(nextLocations);
+                  setRequirementWindow(nextWindow);
+                  await saveRequirementWindow(nextWindow);
+                }
+                setEditingAsset(null);
+                setPresetAssetType(undefined);
+                setModal(null);
+                flash(editingAsset ? "Asset details updated" : "Asset added to inventory");
+              }}
+            />
+          )}
           {modal === "employee" && <EmployeeForm departments={departments} onSave={async (employee) => { setEmployees((rows) => [employee, ...rows]); await saveRecord("employees", employee); setModal(null); flash("Employee added"); }} />}
           {modal === "employeeEdit" && editingEmployee && <EmployeeForm departments={departments} initial={editingEmployee} onSave={async (employee) => { setEmployees((rows) => rows.map((row) => row.id === employee.id ? employee : row)); await saveRecord("employees", employee); setEditingEmployee(null); setModal(null); flash("Employee details updated"); }} />}
           {modal === "departments" && <DepartmentManager departments={departments} employees={employees} onSave={async (items) => { const nextWindow = { ...requirementWindow, departments: items }; setDepartments(items); setRequirementWindow(nextWindow); await saveRequirementWindow(nextWindow); setModal(null); flash("Department list updated"); }} onPurge={async (department) => { const deleted = await purgeDepartmentData(department); setModal(null); flash(`${department} removed · ${deleted.assets} assets, ${deleted.employees} employees, ${deleted.movements} movements and ${deleted.requirements} requirements deleted`); }} />}
+          {modal === "locations" && <LocationManager locations={locations} assets={assets} onSave={async (items) => { const nextWindow = { ...requirementWindow, locations: items }; setLocations(items); setRequirementWindow(nextWindow); await saveRequirementWindow(nextWindow); setModal(null); flash("Classroom / location list updated"); }} />}
+          {modal === "toner" && <TonerForm printers={assets.filter((a) => isPrinterAssetType(a.type))} initial={editingToner ?? undefined} preset={presetTonerModel} onSave={saveToner} />}
+          {modal === "tonerStock" && tonerAction && (
+            <TonerStockActionForm
+              toner={tonerAction.toner}
+              mode={tonerAction.mode}
+              printers={assets.filter((a) => isPrinterAssetType(a.type))}
+              departments={departments}
+              employees={employees}
+              presetPrinterId={tonerAction.presetPrinterId}
+              onSave={(payload) => handleTonerStockAction(tonerAction.toner, tonerAction.mode, payload)}
+            />
+          )}
           {modal === "assign" && <AssignForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, email, shouldSendEmail, note) => {
             const employee = employeeMap[employeeId];
             const assignedAssets: Asset[] = [];
@@ -523,6 +777,8 @@ export default function Home() {
                 ...asset,
                 status: "Assigned",
                 employeeId,
+                allocationType: "person",
+                assignedDepartment: undefined,
                 location: asset.category === "Non-IT Asset" ? employee?.department : asset.location,
                 custodianName: employee?.name,
                 custodianDepartment: employee?.department,
@@ -533,7 +789,6 @@ export default function Home() {
               await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: "Assigned", date: today(), note: movementNote });
             }
 
-            let emailStatusNotice = "";
             if (shouldSendEmail && email) {
               try {
                 const res = await fetch("/api/send-assignment-email", {
@@ -592,6 +847,8 @@ export default function Home() {
                 ...asset,
                 status: "Available",
                 employeeId: undefined,
+                allocationType: undefined,
+                assignedDepartment: undefined,
                 location: asset.category === "Non-IT Asset" ? "Central Stock" : asset.location,
                 custodianName: undefined,
                 custodianDepartment: undefined,
@@ -658,7 +915,7 @@ export default function Home() {
 
             openDocument(clearance ? "Employee Clearance" : "Asset Return", employeeId, assetIds);
           }} />}
-          {modal === "repair" && <RepairForm assets={assets} onSave={async (assetId, action, note) => { const asset = assets.find((row) => row.id === assetId); if (!asset) return; const nextStatus: AssetStatus = action === "start" ? "In repair" : asset.employeeId ? "Assigned" : "Available"; await updateAsset({ ...asset, status: nextStatus, condition: action === "start" ? "Repair" : "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId: asset.employeeId || "", type: "Repair", date: today(), note: `${action === "start" ? "Sent for repair" : "Repair completed"}: ${note}` }); setModal(null); flash(action === "start" ? "Repair record started" : "Repair completion recorded"); }} />}
+          {modal === "repair" && <RepairForm assets={assets} onSave={async (assetId, action, note) => { const asset = assets.find((row) => row.id === assetId); if (!asset) return; const isAllocated = Boolean(asset.employeeId || asset.allocationType === "department" || asset.allocationType === "location"); const nextStatus: AssetStatus = action === "start" ? "In repair" : isAllocated ? "Assigned" : "Available"; await updateAsset({ ...asset, status: nextStatus, condition: action === "start" ? "Repair" : "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId: asset.employeeId || "", type: "Repair", date: today(), note: `${action === "start" ? "Sent for repair" : "Repair completed"}: ${note}` }); setModal(null); flash(action === "start" ? "Repair record started" : "Repair completion recorded"); }} />}
           {modal === "request" && <RequestForm departments={departments} onSave={async (request) => { setRequests((rows) => [request, ...rows]); await saveRecord("requirements", request); setModal(null); flash("Requirement submitted"); }} />}
           {modal === "document" && <PrintableDocument type={documentType} employees={employees} assets={assets} initialEmployeeId={documentEmployeeId} initialAssetIds={documentAssetIds} />}
           {modal === "qrBatch" && <QrBatch assets={assets} employees={employees} departments={departments} employeeMap={employeeMap} />}
@@ -670,11 +927,12 @@ export default function Home() {
   );
 }
 
-function Dashboard({ assets, employees, departments, requests, movements, employeeMap, assetMap, onView, onAddAsset, onAssign, onReturn, onRequest, onAsset }: {
-  assets: Asset[]; employees: Employee[]; departments: string[]; requests: RequestRow[]; movements: Movement[]; employeeMap: Record<string, Employee>; assetMap: Record<string, Asset>; onView: (view: View) => void; onAddAsset: () => void; onAssign: () => void; onReturn: () => void; onRequest: () => void; onAsset: (asset: Asset) => void;
+function Dashboard({ assets, employees, departments, requests, movements, toners, employeeMap, assetMap, onView, onOpenToners, onAddAsset, onAssign, onReturn, onRequest, onAsset }: {
+  assets: Asset[]; employees: Employee[]; departments: string[]; requests: RequestRow[]; movements: Movement[]; toners: TonerStock[]; employeeMap: Record<string, Employee>; assetMap: Record<string, Asset>; onView: (view: View) => void; onOpenToners: () => void; onAddAsset: () => void; onAssign: () => void; onReturn: () => void; onRequest: () => void; onAsset: (asset: Asset) => void;
 }) {
   const assigned = assets.filter((asset) => asset.status === "Assigned").length;
   const available = assets.filter((asset) => asset.status === "Available").length;
+  const lowToners = toners.filter((toner) => toner.quantity <= toner.minStock);
   return (
     <>
       <PageHead eyebrow={new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).toUpperCase()} title="Welcome to AssetFlow" description="Your live company asset register is ready. Add employees and assets to begin.">
@@ -687,6 +945,18 @@ function Dashboard({ assets, employees, departments, requests, movements, employ
         <Metric icon={ClipboardCheck} label="Available stock" value={available.toString()} change="Ready to assign" tone="green" />
         <Metric icon={Wrench} label="Needs attention" value={assets.filter((asset) => asset.status === "In repair").length.toString()} change="Items currently in repair" tone="orange" />
       </div>
+      {lowToners.length > 0 && (
+        <div className="toner-alert-banner">
+          <div>
+            <AlertTriangle size={20} />
+            <div>
+              <strong>{lowToners.length} printer toner SKU{lowToners.length === 1 ? "" : "s"} running low or out of stock</strong>
+              <span>{lowToners.slice(0, 3).map((t) => `${t.tonerModel} (${t.printerModel}: ${t.quantity} left)`).join(" · ")}</span>
+            </div>
+          </div>
+          <button className="button button-secondary button-sm" onClick={onOpenToners}><Droplets size={14} />Manage toner stock →</button>
+        </div>
+      )}
       <DepartmentAvailability assets={assets} employees={employees} departments={departments} onViewAssets={() => onView("Assets")} onAsset={onAsset} />
       <div className="dashboard-grid">
         <section className="panel activity-panel">
@@ -734,7 +1004,7 @@ function DepartmentAvailability({ assets, employees, departments, onViewAssets, 
   const [selectedType, setSelectedType] = useState("");
   const departmentAssets = assets.filter((asset) => {
     if (selectedDepartment === "All departments") return true;
-    const currentDepartment = asset.custodianDepartment || asset.location || (asset.status === "Available" ? "Central Stock" : "");
+    const currentDepartment = asset.assignedDepartment || asset.custodianDepartment || asset.location || (asset.status === "Available" ? "Central Stock" : "");
     return currentDepartment === selectedDepartment;
   });
   const activeEmployees = employees.filter((employee) => employee.status === "Active" && (selectedDepartment === "All departments" || employee.department === selectedDepartment));
@@ -761,59 +1031,196 @@ function DepartmentAvailability({ assets, employees, departments, onViewAssets, 
     {typeSummary.length ? <div className="asset-type-summary">{typeSummary.map(([type, totals]) => { const previewAsset = departmentAssets.find((asset) => asset.type === type && asset.status === "Available") ?? departmentAssets.find((asset) => asset.type === type); const preview = previewAsset ? furnitureImageForAsset(previewAsset) : undefined; return <button type="button" className={`${selectedType === type ? "active" : ""}${preview ? " has-preview" : ""}`} key={type} aria-expanded={selectedType === type} aria-controls="available-asset-details" onClick={() => setSelectedType((current) => current === type ? "" : type)}>{preview && <img className="asset-type-preview" src={preview.src} alt="" />}<div><strong>{type}</strong><span>{totals.available} available</span></div><b>{totals.total}</b><small>{selectedType === type ? "Hide details" : "View available items"}</small></button>; })}</div> : <div className="department-summary-empty"><Package size={20} /><span>No assets are currently recorded for this department.</span></div>}
     {selectedType && <div className="available-asset-details" id="available-asset-details">
       <div className="available-asset-details-head"><div><span>AVAILABLE ASSETS</span><h3>{selectedType} · {selectedDepartment}</h3></div><strong>{selectedAvailableAssets.length} item{selectedAvailableAssets.length === 1 ? "" : "s"}</strong></div>
-      {selectedAvailableAssets.length ? <div className="available-asset-list">{selectedAvailableAssets.map((asset) => { const furniture = furnitureImageForAsset(asset); return <button type="button" key={asset.id} onClick={() => onAsset(asset)}><span className={furniture ? "available-asset-icon has-image" : "available-asset-icon"}>{furniture ? <img src={furniture.src} alt="" /> : <Package size={18} />}</span><span className="available-asset-main"><strong>{asset.name}</strong><small>{asset.code} · {asset.category}</small></span><span className="available-asset-spec"><strong>{[asset.brand, asset.model].filter(Boolean).join(" · ") || "Brand / model not recorded"}</strong><small>{asset.serial || asset.location || "No serial or location"}</small></span><span className="available-asset-condition">{asset.condition}</span><ExternalLink size={15} /></button>; })}</div> : <div className="available-asset-empty"><ClipboardCheck size={19} /><div><strong>No available {selectedType.toLowerCase()} items</strong><span>This department has {typeSummary.find(([type]) => type === selectedType)?.[1].total ?? 0} recorded, but all are currently assigned or otherwise unavailable.</span></div></div>}
+      {selectedAvailableAssets.length ? <div className="available-asset-list">{selectedAvailableAssets.map((asset) => { const furniture = furnitureImageForAsset(asset); const keySpecs = getAssetKeySpecChips(asset); return <button type="button" key={asset.id} onClick={() => onAsset(asset)}><span className={furniture ? "available-asset-icon has-image" : "available-asset-icon"}>{furniture ? <img src={furniture.src} alt="" /> : assetTypeIcon(asset.type, 18)}</span><span className="available-asset-main"><strong>{asset.name}</strong><small>{asset.code} · {asset.category}</small></span><span className="available-asset-spec"><strong>{[asset.brand, asset.model].filter(Boolean).join(" · ") || "Brand / model not recorded"}</strong><small>{keySpecs.length ? keySpecs.join(" · ") : (asset.serial || asset.location || "No serial or location")}</small></span><span className="available-asset-condition">{asset.condition}</span><ExternalLink size={15} /></button>; })}</div> : <div className="available-asset-empty"><ClipboardCheck size={19} /><div><strong>No available {selectedType.toLowerCase()} items</strong><span>This department has {typeSummary.find(([type]) => type === selectedType)?.[1].total ?? 0} recorded, but all are currently assigned or otherwise unavailable.</span></div></div>}
     </div>}
     <button className="department-summary-link" onClick={onViewAssets}>Open full asset register →</button>
   </section>;
 }
 
-function AssetsView({ assets, employeeMap, category, setCategory, departments, onAdd, onAsset, onExport, onQrBatch }: { assets: Asset[]; employeeMap: Record<string, Employee>; category: string; setCategory: (value: string) => void; departments: string[]; onAdd: () => void; onAsset: (asset: Asset) => void; onExport: (filtered: Asset[]) => void; onQrBatch: () => void }) {
+function AssetsView({
+  assets,
+  toners,
+  employeeMap,
+  category,
+  setCategory,
+  departments,
+  locations,
+  onAdd,
+  onAsset,
+  onExport,
+  onQrBatch,
+  onOpenToners,
+  onAddToner,
+  onTonerStockAction,
+}: {
+  assets: Asset[];
+  toners: TonerStock[];
+  employeeMap: Record<string, Employee>;
+  category: string;
+  setCategory: (value: string) => void;
+  departments: string[];
+  locations: string[];
+  onAdd: (defaultType?: string) => void;
+  onAsset: (asset: Asset) => void;
+  onExport: (filtered: Asset[]) => void;
+  onQrBatch: () => void;
+  onOpenToners: () => void;
+  onAddToner: (preset?: { model: string; brand?: string; compatibleToner?: string }) => void;
+  onTonerStockAction: (toner: TonerStock, mode: "Restock" | "Issued", printerId?: string) => void;
+}) {
   const [typeFilter, setTypeFilter] = useState("All");
   const [departmentFilter, setDepartmentFilter] = useState("All");
 
   const filtered = assets.filter((asset) => {
     if (typeFilter !== "All" && asset.type !== typeFilter) return false;
     if (departmentFilter !== "All") {
-      const dep = asset.employeeId ? employeeMap[asset.employeeId]?.department : (asset.custodianDepartment || asset.location);
-      if (dep !== departmentFilter) return false;
+      const dep = asset.employeeId
+        ? employeeMap[asset.employeeId]?.department
+        : (asset.assignedDepartment || asset.custodianDepartment || asset.location);
+      if (dep !== departmentFilter && asset.location !== departmentFilter) return false;
     }
     return true;
   });
 
+  const quickItTypes = [
+    { value: "All", label: "All items" },
+    { value: "Laptop", label: "Laptops" },
+    { value: "Monitor", label: "Staff Monitors" },
+    { value: "Classroom / Location Monitor", label: "Classroom / Location Monitors" },
+    { value: "Google Chromecast", label: "Google Chromecast" },
+    { value: "Printer", label: "Printers" },
+  ];
+
+  const allFilterOptions = useMemo(() => {
+    const typeSet = new Set<string>(assets.map((a) => a.type));
+    ASSET_TYPES["IT Asset"].forEach((t) => typeSet.add(t));
+    ASSET_TYPES["Non-IT Asset"].forEach((t) => typeSet.add(t));
+    return Array.from(typeSet).sort();
+  }, [assets]);
+
   return (
     <>
-      <PageHead eyebrow="INVENTORY" title="Assets" description="Track every IT and non-IT item, its condition, owner and complete history.">
+      <PageHead eyebrow="INVENTORY" title="Assets" description="Track every IT and non-IT item, laptop cores, location allocations, printers, and complete history.">
         <button className="button button-secondary" onClick={onQrBatch}><QrCode size={17} />Print QR labels</button>
         <button className="button button-secondary" onClick={() => onExport(filtered)}><Download size={17} />Export</button>
-        <button className="button button-primary" onClick={onAdd}><Plus size={17} />Add asset</button>
+        <button className="button button-primary" onClick={() => onAdd(typeFilter !== "All" ? typeFilter : undefined)}><Plus size={17} />Add asset</button>
       </PageHead>
       <div className="filter-tabs">
         {["All", "IT Asset", "Non-IT Asset"].map((item) => <button className={category === item ? "active" : ""} key={item} onClick={() => { setCategory(item); setTypeFilter("All"); }}>{item}<span>{item === "All" ? assets.length : assets.filter((asset) => asset.category === item).length}</span></button>)}
-        
-        <select 
+
+        <select
           className="select-filter"
-          style={{ marginLeft: "auto", border: "1px solid var(--border)", padding: "4px 8px", borderRadius: "6px", backgroundColor: "var(--background)", color: "var(--text)" }}
-          value={typeFilter} 
+          style={{ marginLeft: "auto" }}
+          value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
         >
           <option value="All">All Types</option>
-          {Array.from(new Set(assets.map(a => a.type))).sort().map(t => <option key={t} value={t}>{t}</option>)}
+          {allFilterOptions.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
-        
-        <select 
+
+        <select
           className="select-filter"
-          style={{ marginLeft: "8px", border: "1px solid var(--border)", padding: "4px 8px", borderRadius: "6px", backgroundColor: "var(--background)", color: "var(--text)" }}
-          value={departmentFilter} 
+          style={{ marginLeft: "8px" }}
+          value={departmentFilter}
           onChange={(e) => setDepartmentFilter(e.target.value)}
         >
-          <option value="All">All Departments</option>
-          {departments.map(d => <option key={d} value={d}>{d}</option>)}
+          <option value="All">All Departments &amp; Locations</option>
+          <optgroup label="Departments">
+            {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+          </optgroup>
+          {groupLocationsByBuilding(locations).map(([building, rooms]) => (
+            <optgroup key={building} label={building}>
+              {rooms.map((room) => <option key={room.value} value={room.value}>{room.label}</option>)}
+            </optgroup>
+          ))}
         </select>
       </div>
+
+      {category !== "Non-IT Asset" && (
+        <div className="quick-filter-pills">
+          {quickItTypes.map((pill) => {
+            const count = pill.value === "All" ? assets.length : assets.filter((a) => a.type === pill.value).length;
+            return (
+              <button
+                key={pill.value}
+                type="button"
+                className={typeFilter === pill.value ? "active" : ""}
+                onClick={() => setTypeFilter(pill.value)}
+              >
+                {pill.label}
+                <span>{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <section className="panel table-panel">
-        <div className="table-toolbar"><div><strong>Asset register</strong><small>{filtered.length} matching records</small></div><div className="legend"><span><i className="dot green" />Available</span><span><i className="dot blue" />Assigned</span><span><i className="dot orange" />Repair</span></div></div>
+        <div className="table-toolbar"><div><strong>Asset register</strong><small>{filtered.length} matching records</small></div><div className="legend"><span><i className="dot green" />Available</span><span><i className="dot blue" />Assigned / Allocated</span><span><i className="dot orange" />Repair</span></div></div>
         <AssetTable assets={filtered} employeeMap={employeeMap} onAsset={onAsset} />
       </section>
+
+      {typeFilter === "Printer" && (
+        <section className="panel printer-toner-subsection">
+          <div className="printer-toner-subsection-head">
+            <div>
+              <span className="section-kicker">PRINTER SUBSECTION</span>
+              <h3>Toner Stock by Printer Model</h3>
+              <p>Maintain compatible toner inventory for your registered printers.</p>
+            </div>
+            <div className="page-actions">
+              <button className="button button-secondary button-sm" onClick={() => onAddToner()}>
+                <Plus size={14} />Add toner SKU
+              </button>
+              <button className="button button-primary button-sm" onClick={onOpenToners}>
+                <Droplets size={14} />Open full Toner Manager →
+              </button>
+            </div>
+          </div>
+          {toners.length === 0 ? (
+            <div className="empty-panel">
+              <Droplets size={20} />
+              <strong>No toner stock items recorded yet</strong>
+              <span>Add toner SKUs mapped to your printer models to track stock and issue cartridges.</span>
+            </div>
+          ) : (
+            <div className="responsive-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Printer model</th>
+                    <th>Toner model</th>
+                    <th>Color</th>
+                    <th>Stock</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {toners.map((toner) => {
+                    const st = tonerStockStatus(toner);
+                    return (
+                      <tr key={toner.id}>
+                        <td><strong>{toner.printerBrand ? `${toner.printerBrand} ` : ""}{toner.printerModel}</strong></td>
+                        <td>{toner.tonerModel}</td>
+                        <td>{toner.color}</td>
+                        <td><strong>{toner.quantity}</strong> <span className="muted">(min {toner.minStock})</span></td>
+                        <td><span className={statusClass(st)}>{st}</span></td>
+                        <td>
+                          <div className="toner-actions">
+                            <button type="button" className="button button-secondary button-sm" onClick={() => onTonerStockAction(toner, "Restock")}>+ Restock</button>
+                            <button type="button" className="button button-primary button-sm" disabled={toner.quantity <= 0} onClick={() => onTonerStockAction(toner, "Issued")}>Issue</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
     </>
   );
 }
@@ -870,7 +1277,112 @@ function RequirementsView({ requests, setRequests, windowConfig, setWindowConfig
   );
 }
 
-function ReportsView({ assets, employees, requests, onExport, onDocument }: { assets: Asset[]; employees: Employee[]; requests: RequestRow[]; onExport: () => void; onDocument: (type: string) => void }) {
+type StructuredReportId = "laptops" | "monitors" | "headsets" | "mouses" | "employeeIt" | "printersToners";
+
+function ReportsView({
+  assets,
+  employees,
+  employeeMap,
+  toners,
+  tonerTransactions,
+  requests,
+  onExport,
+  onDocument,
+  onDownloadStructuredReport,
+}: {
+  assets: Asset[];
+  employees: Employee[];
+  employeeMap: Record<string, Employee>;
+  toners: TonerStock[];
+  tonerTransactions: TonerTransaction[];
+  requests: RequestRow[];
+  onExport: () => void;
+  onDocument: (type: string) => void;
+  onDownloadStructuredReport: (id: StructuredReportId) => Promise<void>;
+}) {
+  const [downloading, setDownloading] = useState<string>("");
+
+  const laptopCount = assets.filter((a) => a.type === "Laptop").length;
+  const staffMonitorCount = assets.filter((a) => a.type === "Monitor").length;
+  const locationMonitorCount = assets.filter((a) => a.type === "Classroom / Location Monitor").length;
+  const headsetCount = assets.filter((a) => a.type === "Headset").length;
+  const mouseCount = assets.filter((a) => a.type === "Mouse").length;
+  const itAssignedCount = assets.filter((a) => a.category === "IT Asset" && Boolean(a.employeeId && employeeMap[a.employeeId])).length;
+  const printerCount = assets.filter((a) => a.type === "Printer").length;
+  const tonerUnits = toners.reduce((sum, t) => sum + t.quantity, 0);
+
+  const structuredReports: {
+    id: StructuredReportId;
+    badge: string;
+    icon: typeof Laptop;
+    title: string;
+    count: string;
+    copy: string;
+    columns: string;
+    tone: string;
+  }[] = [
+    {
+      id: "laptops",
+      badge: "REPORT 01",
+      icon: Laptop,
+      title: "All Staff Laptops",
+      count: `${laptopCount} laptop${laptopCount === 1 ? "" : "s"}`,
+      copy: "Sorted A–Z by Department with processor, P-Cores, E-Cores, RAM, storage & verification status.",
+      columns: "Emp No · Name · Department · Asset Name · Model · Serial · Processor · P-Cores · E-Cores · Verified (Yes/No)",
+      tone: "violet",
+    },
+    {
+      id: "monitors",
+      badge: "REPORT 02",
+      icon: Monitor,
+      title: "All Staff Monitors",
+      count: `${staffMonitorCount} staff · ${locationMonitorCount} classroom`,
+      copy: "Sorted A–Z by Department, plus a separate sheet for Classroom & Location Monitors by Building.",
+      columns: "Emp No · Name · Department · Asset Name · Model · Serial · Screen Size · Resolution · Connection · Verified",
+      tone: "blue",
+    },
+    {
+      id: "headsets",
+      badge: "REPORT 03",
+      icon: Headphones,
+      title: "All Staff Headsets",
+      count: `${headsetCount} headset${headsetCount === 1 ? "" : "s"}`,
+      copy: "Sorted A–Z by Department with brand, model, serial, connection type, and Department Summary sheet.",
+      columns: "Emp No · Name · Department · Asset Name · Brand · Model · Serial · Connection Type · Status · Verified",
+      tone: "pink",
+    },
+    {
+      id: "mouses",
+      badge: "REPORT 04",
+      icon: Mouse,
+      title: "All Staff Mouses",
+      count: `${mouseCount} mouse${mouseCount === 1 ? "" : "s"}`,
+      copy: "Sorted A–Z by Department with brand, model, serial, connection type, and Department Summary sheet.",
+      columns: "Emp No · Name · Department · Asset Name · Brand · Model · Serial · Connection Type · Status · Verified",
+      tone: "green",
+    },
+    {
+      id: "employeeIt",
+      badge: "REPORT 05",
+      icon: Users,
+      title: "Employee IT Assets Details",
+      count: `${employees.length} staff · ${itAssignedCount} assigned IT`,
+      copy: "Complete staff-by-staff IT summary + itemized IT list (A–Z by Department) + Classroom/Chromecast sheet.",
+      columns: "Emp No · Name · Department · Laptop & Specs · Monitor · Mouse · Headset · Other IT · Verified",
+      tone: "orange",
+    },
+    {
+      id: "printersToners",
+      badge: "REPORT 06",
+      icon: Printer,
+      title: "Printer & Toner Details",
+      count: `${printerCount} printers · ${toners.length} toner SKUs (${tonerUnits} units · ${tonerTransactions.length} logs)`,
+      copy: "3 formatted sheets: Printers Register (A–Z Dept), Toner Stock by Printer Model, and Issue/Restock History.",
+      columns: "Department · Assigned To · Printer Model · Serial · Compatible Toner · Stock Balance · History",
+      tone: "slate",
+    },
+  ];
+
   const cards = [
     { icon: FileSpreadsheet, title: "Current asset register", copy: `${assets.length} assets with current owners, departments and condition`, action: "Export Excel", click: onExport, tone: "green" },
     { icon: Users, title: "Employee asset summary", copy: `${employees.length} employees with every item currently assigned`, action: "Generate PDF", click: () => onDocument("Employee Asset Summary"), tone: "blue" },
@@ -879,52 +1391,801 @@ function ReportsView({ assets, employees, requests, onExport, onDocument }: { as
     { icon: CalendarClock, title: "Requirement forecast", copy: `${requests.length} requests grouped by department and needed date`, action: "Export forecast", click: onExport, tone: "pink" },
     { icon: History, title: "Asset movement history", copy: "Auditable assignment, return and repair trail", action: "Generate PDF", click: () => onDocument("Movement History"), tone: "slate" },
   ];
+
   return (
     <>
-      <PageHead eyebrow="DOCUMENT CENTRE" title="Reports & documents" description="Generate live operational reports, handover forms and clearance records."><button className="button button-primary" onClick={onExport}><Download size={17} />Export all data</button></PageHead>
-      <div className="report-grid">{cards.map(({ icon: Icon, title, copy, action, click, tone }) => <article className="report-card" key={title}><span className={`report-icon ${tone}`}><Icon size={22} /></span><h3>{title}</h3><p>{copy}</p><button onClick={click}>{action}<ArrowDownToLine size={16} /></button></article>)}</div>
+      <PageHead eyebrow="DOCUMENT CENTRE" title="Reports & documents" description="Download cleanly formatted Excel reports sorted A–Z by Department, or generate official PDF handover and clearance documents.">
+        <button className="button button-secondary" onClick={onExport}><Download size={17} />Export master register</button>
+      </PageHead>
+
+      <section className="report-section-block">
+        <div className="report-section-head">
+          <div>
+            <span className="section-kicker">FORMATTED EXCEL REPORTS (A–Z BY DEPARTMENT)</span>
+            <h2>Structured IT &amp; Inventory Reports</h2>
+            <p>Each report downloads as a styled Excel workbook with titled headers, borders, auto-fitted columns, status highlights, frozen header rows, and department summaries.</p>
+          </div>
+        </div>
+        <div className="report-grid">
+          {structuredReports.map(({ id, badge, icon: Icon, title, count, copy, columns, tone }) => (
+            <article className="report-card structured-report-card" key={id}>
+              <div className="structured-report-top">
+                <span className={`report-icon ${tone}`}><Icon size={22} /></span>
+                <div className="structured-report-meta">
+                  <span className="report-badge-tag">{badge}</span>
+                  <small>{count}</small>
+                </div>
+              </div>
+              <h3>{title}</h3>
+              <p>{copy}</p>
+              <div className="report-columns-preview">
+                <strong>Columns included:</strong>
+                <span>{columns}</span>
+              </div>
+              <button
+                type="button"
+                className="structured-download-btn"
+                disabled={downloading === id}
+                onClick={async () => {
+                  setDownloading(id);
+                  try {
+                    await onDownloadStructuredReport(id);
+                  } finally {
+                    setDownloading("");
+                  }
+                }}
+              >
+                {downloading === id ? "Preparing Excel…" : "Download styled Excel"}
+                <ArrowDownToLine size={16} />
+              </button>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="report-section-block" style={{ marginTop: "26px" }}>
+        <div className="report-section-head">
+          <div>
+            <span className="section-kicker">OFFICIAL FORMS &amp; MASTER EXPORTS</span>
+            <h2>Handover, Clearance &amp; General Documents</h2>
+            <p>Printable handover receipts, clearance certificates, and full multi-sheet register backups.</p>
+          </div>
+        </div>
+        <div className="report-grid">
+          {cards.map(({ icon: Icon, title, copy, action, click, tone }) => (
+            <article className="report-card" key={title}>
+              <span className={`report-icon ${tone}`}><Icon size={22} /></span>
+              <h3>{title}</h3>
+              <p>{copy}</p>
+              <button onClick={click}>{action}<ArrowDownToLine size={16} /></button>
+            </article>
+          ))}
+        </div>
+      </section>
     </>
   );
 }
 
 function AssetTable({ assets, employeeMap, onAsset, compact = false }: { assets: Asset[]; employeeMap: Record<string, Employee>; onAsset: (asset: Asset) => void; compact?: boolean }) {
-  return <div className="responsive-table"><table><thead><tr><th>Asset</th><th>Category</th>{!compact && <th>Serial / location</th>}<th>Assigned to</th><th>Status</th><th /></tr></thead><tbody>{assets.map((asset) => { const furniture = furnitureImageForAsset(asset); return <tr key={asset.id} onClick={() => onAsset(asset)}><td><div className="asset-cell"><span className={furniture ? "asset-list-image" : ""}>{furniture ? <img src={furniture.src} alt="" /> : asset.type === "Mobile Phone" ? <Smartphone size={18} /> : <Monitor size={18} />}</span><div><strong>{asset.name}</strong><small>{asset.code}</small></div></div></td><td><span className="category-label">{asset.category}</span></td>{!compact && <td><code>{asset.serial || asset.location || "—"}</code></td>}<td>{asset.employeeId ? <div className="mini-person"><span>{initials(employeeMap[asset.employeeId]?.name || "")}</span><div><strong>{employeeMap[asset.employeeId]?.name}</strong><small>{employeeMap[asset.employeeId]?.department}</small></div></div> : <span className="muted">{asset.category === "Non-IT Asset" ? asset.location || "—" : "—"}</span>}</td><td><span className={statusClass(asset.status)}>{asset.status}</span></td><td><button className="row-action" aria-label={`View ${asset.name}`}>→</button></td></tr>; })}</tbody></table></div>;
+  return (
+    <div className="responsive-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Asset</th>
+            <th>Category / Type</th>
+            {!compact && <th>Serial / location</th>}
+            <th>Assigned to</th>
+            <th>Status</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {assets.map((asset) => {
+            const furniture = furnitureImageForAsset(asset);
+            const specChips = getAssetKeySpecChips(asset);
+            const isLocationAlloc = (asset.allocationType === "location" || isLocationOnlyAssetType(asset.type)) && Boolean(asset.location) && asset.location !== "Central Stock";
+            const isDeptAlloc = asset.allocationType === "department" && Boolean(asset.assignedDepartment);
+            return (
+              <tr key={asset.id} onClick={() => onAsset(asset)}>
+                <td>
+                  <div className="asset-cell">
+                    <span className={furniture ? "asset-list-image" : ""}>
+                      {furniture ? <img src={furniture.src} alt="" /> : assetTypeIcon(asset.type, 18)}
+                    </span>
+                    <div>
+                      <strong>{asset.name}</strong>
+                      <small>{asset.code}{asset.model ? ` · ${asset.model}` : ""}</small>
+                      {specChips.length > 0 && (
+                        <div className="spec-chip-row">
+                          {specChips.slice(0, compact ? 2 : 4).map((chip) => (
+                            <span className="spec-chip" key={chip}>{chip}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <span className="category-label">{asset.type}</span>
+                  <div className="muted" style={{ fontSize: "7.5px", marginTop: "2px" }}>{asset.category}</div>
+                </td>
+                {!compact && (
+                  <td>
+                    <code>{asset.serial || asset.location || "—"}</code>
+                    {asset.serial && asset.location && (
+                      <div className="sub-location"><MapPin size={11} />{asset.location}</div>
+                    )}
+                  </td>
+                )}
+                <td>
+                  {asset.employeeId ? (
+                    <div className="mini-person">
+                      <span>{initials(employeeMap[asset.employeeId]?.name || "")}</span>
+                      <div>
+                        <strong>{employeeMap[asset.employeeId]?.name}</strong>
+                        <small>{employeeMap[asset.employeeId]?.department}</small>
+                      </div>
+                    </div>
+                  ) : isDeptAlloc ? (
+                    <div className="dept-assign-badge">
+                      <span><Building2 size={13} /></span>
+                      <div>
+                        <strong>{asset.assignedDepartment}</strong>
+                        <small>Department assigned</small>
+                      </div>
+                    </div>
+                  ) : isLocationAlloc ? (
+                    <div className="location-badge">
+                      <span><MapPin size={13} /></span>
+                      <div>
+                        <strong>{asset.location}</strong>
+                        <small>Classroom / Location</small>
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="muted">{asset.category === "Non-IT Asset" ? asset.location || "—" : "—"}</span>
+                  )}
+                </td>
+                <td><span className={statusClass(asset.status)}>{asset.status}</span></td>
+                <td><button className="row-action" aria-label={`View ${asset.name}`}>→</button></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
-function AssetDrawer({ asset, employee, movements, employeeMap, onClose, onEdit, onDelete }: { asset: Asset; employee?: Employee; movements: Movement[]; employeeMap: Record<string, Employee>; onClose: () => void; onEdit: () => void; onDelete: () => void }) {
+function AssetDrawer({
+  asset,
+  employee,
+  movements,
+  employeeMap,
+  toners,
+  onClose,
+  onEdit,
+  onToggleVerified,
+  onDelete,
+  onAddToner,
+  onTonerStockAction,
+}: {
+  asset: Asset;
+  employee?: Employee;
+  movements: Movement[];
+  employeeMap: Record<string, Employee>;
+  toners: TonerStock[];
+  onClose: () => void;
+  onEdit: () => void;
+  onToggleVerified: () => void;
+  onDelete: () => void;
+  onAddToner: (preset: { model: string; brand?: string; compatibleToner?: string }) => void;
+  onTonerStockAction: (toner: TonerStock, mode: "Restock" | "Issued", printerId?: string) => void;
+}) {
   const [qr, setQr] = useState("");
   const furniture = furnitureImageForAsset(asset);
+  const isLocationAlloc = (asset.allocationType === "location" || isLocationOnlyAssetType(asset.type)) && Boolean(asset.location) && asset.location !== "Central Stock";
+  const isDeptAlloc = asset.allocationType === "department" && Boolean(asset.assignedDepartment);
+  const matchedToners = isPrinterAssetType(asset.type)
+    ? toners.filter((t) => tonerMatchesPrinter(t, asset))
+    : [];
+
   useEffect(() => { QRCode.toDataURL(`${window.location.origin}/asset/${asset.id}`, { width: 240, margin: 1, color: { dark: "#111827", light: "#ffffff" } }).then(setQr); }, [asset.id]);
-  return <><button className="drawer-backdrop" aria-label="Close asset details" onClick={onClose} /><aside className="drawer"><div className="drawer-head"><div><span>{asset.code}</span><h2>{asset.name}</h2></div><button className="icon-button" onClick={onClose}><X size={20} /></button></div><div className="drawer-body"><div className="drawer-actions"><button className="button button-secondary" onClick={onEdit}><Pencil size={15} />Edit asset</button><button className="button button-danger" onClick={onDelete}><X size={15} />Delete asset</button></div><div className={furniture ? "asset-hero furniture-hero" : "asset-hero"}>{furniture ? <img src={furniture.src} alt={`${furniture.label} ${furniture.model}`} /> : <span className="asset-big-icon"><Monitor size={34} /></span>}<div><span className={statusClass(asset.status)}>{asset.status}</span><p>{asset.brand} · {asset.model}</p></div></div><section className="detail-section"><h3>Asset details</h3><div className="detail-grid">{asset.category === "IT Asset" ? <label>Serial number<strong>{asset.serial || "Not recorded"}</strong></label> : <label>Current location<strong>{asset.location || asset.custodianDepartment || "Not recorded"}</strong></label>}<label>Condition<strong>{asset.condition}</strong></label><label>Category<strong>{asset.category}</strong></label><label>Type<strong>{asset.type}</strong></label>{Object.entries(asset.specs ?? {}).filter(([, value]) => value).map(([key, value]) => <label key={key}>{specLabel(key)}<strong>{value}</strong></label>)}</div><p className="spec-box">{asset.details || "No additional notes recorded."}</p></section><section className="detail-section"><h3>Current custodian</h3>{employee ? <div className="owner-card"><span>{initials(employee.name)}</span><div><strong>{employee.name}</strong><small>{employee.empNo} · {employee.department}</small><a href={`mailto:${employee.email}`}>{employee.email}</a></div></div> : <div className="empty-owner"><Package size={21} />Available at {asset.location || "central stock"}</div>}</section><section className="detail-section qr-section"><div><h3>Live QR label</h3><p>Print and attach this code. Scanning always opens the latest asset record.</p><button className="button button-secondary" onClick={() => window.print()}><Printer size={16} />Print label</button></div>{qr && <img src={qr} alt={`QR code for ${asset.code}`} />}</section><section className="detail-section"><h3>History</h3><div className="mini-history">{movements.length ? movements.map((movement) => <div key={movement.id}><i /><div><strong>{movement.type}</strong><p>{employeeMap[movement.employeeId]?.name} · {movement.note}</p><small>{new Date(movement.date).toLocaleDateString("en-GB")}</small></div></div>) : <p className="muted">No previous movements.</p>}</div></section></div></aside></>;
+  return (
+    <>
+      <button className="drawer-backdrop" aria-label="Close asset details" onClick={onClose} />
+      <aside className="drawer">
+        <div className="drawer-head">
+          <div><span>{asset.code}</span><h2>{asset.name}</h2></div>
+          <button className="icon-button" onClick={onClose}><X size={20} /></button>
+        </div>
+        <div className="drawer-body">
+          <div className="drawer-actions">
+            <button className="button button-secondary" onClick={onEdit}><Pencil size={15} />Edit asset</button>
+            <button
+              className={asset.verified ? "button button-verified" : "button button-secondary"}
+              onClick={onToggleVerified}
+              title="Toggle physical asset verification status for audit reports"
+            >
+              <CheckCircle2 size={15} />{asset.verified ? "Verified: Yes" : "Verify asset"}
+            </button>
+            <button className="button button-danger" onClick={onDelete}><X size={15} />Delete asset</button>
+          </div>
+          <div className={furniture ? "asset-hero furniture-hero" : "asset-hero"}>
+            {furniture ? <img src={furniture.src} alt={`${furniture.label} ${furniture.model}`} /> : <span className="asset-big-icon">{assetTypeIcon(asset.type, 34)}</span>}
+            <div><span className={statusClass(asset.status)}>{asset.status}</span><p>{asset.brand} · {asset.model}</p></div>
+          </div>
+          <section className="detail-section">
+            <h3>Asset details</h3>
+            <div className="detail-grid">
+              {asset.category === "IT Asset" ? <label>Serial number<strong>{asset.serial || "Not recorded"}</strong></label> : <label>Current location<strong>{asset.location || asset.custodianDepartment || "Not recorded"}</strong></label>}
+              {asset.category === "IT Asset" && asset.location && <label>Classroom / Location<strong>{asset.location}</strong></label>}
+              {asset.assignedDepartment && <label>Assigned department<strong>{asset.assignedDepartment}</strong></label>}
+              <label>Condition<strong>{asset.condition}</strong></label>
+              <label>Asset verified<strong>{asset.verified ? "Yes" : "No"}</strong></label>
+              <label>Category<strong>{asset.category}</strong></label>
+              <label>Type<strong>{asset.type}</strong></label>
+              {Object.entries(asset.specs ?? {}).filter(([, value]) => value).map(([key, value]) => (
+                <label key={key}>{specLabel(key)}<strong>{value}</strong></label>
+              ))}
+            </div>
+            <p className="spec-box">{asset.details || "No additional notes recorded."}</p>
+          </section>
+          <section className="detail-section">
+            <h3>Current custodian / allocation</h3>
+            {employee ? (
+              <div className="owner-card">
+                <span>{initials(employee.name)}</span>
+                <div>
+                  <strong>{employee.name}</strong>
+                  <small>{employee.empNo} · {employee.department}</small>
+                  <a href={`mailto:${employee.email}`}>{employee.email}</a>
+                </div>
+              </div>
+            ) : isDeptAlloc ? (
+              <div className="owner-card">
+                <span><Building2 size={18} /></span>
+                <div>
+                  <strong>{asset.assignedDepartment}</strong>
+                  <small>Department-assigned printer{asset.location ? ` · ${asset.location}` : ""}</small>
+                </div>
+              </div>
+            ) : isLocationAlloc ? (
+              <div className="owner-card">
+                <span><MapPin size={18} /></span>
+                <div>
+                  <strong>{asset.location}</strong>
+                  <small>Allocated to classroom / location (not assigned to a person)</small>
+                </div>
+              </div>
+            ) : (
+              <div className="empty-owner"><Package size={21} />Available at {asset.location || "central stock"}</div>
+            )}
+          </section>
+
+          {isPrinterAssetType(asset.type) && (
+            <section className="detail-section">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "11px" }}>
+                <h3 style={{ margin: 0 }}>Compatible toner stock (Subsection)</h3>
+                <button
+                  type="button"
+                  className="inline-link-btn"
+                  onClick={() => onAddToner({ model: asset.model, brand: asset.brand, compatibleToner: asset.specs?.compatibleToner })}
+                >
+                  + Add toner
+                </button>
+              </div>
+              {matchedToners.length > 0 ? (
+                <div className="toner-drawer-list">
+                  {matchedToners.map((toner) => {
+                    const st = tonerStockStatus(toner);
+                    return (
+                      <div className="toner-drawer-row" key={toner.id}>
+                        <div>
+                          <strong>{toner.tonerModel} ({toner.color})</strong>
+                          <small>{toner.quantity} in stock · min {toner.minStock}</small>
+                        </div>
+                        <div>
+                          <span className={statusClass(st)}>{st}</span>
+                          <button
+                            type="button"
+                            className="button button-secondary button-sm"
+                            onClick={() => onTonerStockAction(toner, toner.quantity > 0 ? "Issued" : "Restock", asset.id)}
+                          >
+                            {toner.quantity > 0 ? "Issue" : "Restock"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="empty-owner">
+                  <Droplets size={18} />
+                  <span>No toner stock linked to {asset.model || "this printer model"} yet.</span>
+                </div>
+              )}
+            </section>
+          )}
+
+          <section className="detail-section qr-section">
+            <div><h3>Live QR label</h3><p>Print and attach this code. Scanning always opens the latest asset record.</p><button className="button button-secondary" onClick={() => window.print()}><Printer size={16} />Print label</button></div>
+            {qr && <img src={qr} alt={`QR code for ${asset.code}`} />}
+          </section>
+          <section className="detail-section">
+            <h3>History</h3>
+            <div className="mini-history">{movements.length ? movements.map((movement) => <div key={movement.id}><i /><div><strong>{movement.type}</strong><p>{employeeMap[movement.employeeId]?.name} · {movement.note}</p><small>{new Date(movement.date).toLocaleDateString("en-GB")}</small></div></div>) : <p className="muted">No previous movements.</p>}</div>
+          </section>
+        </div>
+      </aside>
+    </>
+  );
 }
 
 function Modal({ title, children, onClose, wide = false }: { title: string; children: React.ReactNode; onClose: () => void; wide?: boolean }) {
   return <div className="modal-backdrop"><section className={wide ? "modal modal-wide" : "modal"}><div className="modal-head"><div><span>ASSETFLOW</span><h2>{title}</h2></div><button className="icon-button" onClick={onClose}><X size={20} /></button></div><div className="modal-body">{children}</div></section></div>;
 }
 
-function AssetForm({ departments, onSave, initial }: { departments: string[]; onSave: (asset: Asset) => void; initial?: Asset }) {
-  const [form, setForm] = useState({ category: initial?.category ?? "IT Asset", type: initial?.type ?? "Laptop", name: initial?.name ?? "", brand: initial?.brand ?? "", model: initial?.model ?? "", serial: initial?.serial ?? "", location: initial?.location ?? departments[0] ?? "", condition: initial?.condition ?? "Excellent", details: initial?.details ?? "", imageKey: initial?.imageKey ?? "" });
+function AssetForm({
+  departments,
+  locations,
+  employees,
+  onSave,
+  initial,
+  defaultType,
+}: {
+  departments: string[];
+  locations: string[];
+  employees: Employee[];
+  onSave: (asset: Asset) => void;
+  initial?: Asset;
+  defaultType?: string;
+}) {
+  const initialType = initial?.type ?? defaultType ?? "Laptop";
+  const initialCategory: "IT Asset" | "Non-IT Asset" = initial?.category ?? (
+    (ASSET_TYPES["Non-IT Asset"] as readonly string[]).includes(initialType) && !(ASSET_TYPES["IT Asset"] as readonly string[]).includes(initialType)
+      ? "Non-IT Asset"
+      : "IT Asset"
+  );
+  const initialLocationList = Array.from(new Set([...locations, ...departments]));
+  const initialIsCustomLocation = Boolean(
+    initial?.location &&
+    initial.location !== "Central Stock" &&
+    !initialLocationList.includes(initial.location),
+  );
+
+  const [form, setForm] = useState({
+    category: initialCategory,
+    type: initialType,
+    name: initial?.name ?? "",
+    brand: initial?.brand ?? "",
+    model: initial?.model ?? "",
+    serial: initial?.serial ?? "",
+    location: initialIsCustomLocation ? "__custom__" : (initial?.location ?? (initialCategory === "Non-IT Asset" ? (departments[0] ?? "Central Stock") : "Central Stock")),
+    customLocation: initialIsCustomLocation ? (initial?.location ?? "") : "",
+    condition: initial?.condition ?? "Excellent",
+    verified: initial?.verified ? "Yes" : "No",
+    details: initial?.details ?? "",
+    imageKey: initial?.imageKey ?? "",
+  });
+
+  const activeEmployees = employees.filter((employee) => employee.status === "Active");
+  const initialPrinterMode: "stock" | "department" | "person" =
+    initial?.allocationType === "department" || initial?.assignedDepartment
+      ? "department"
+      : initial?.employeeId
+        ? "person"
+        : "stock";
+
+  const [printerAssignMode, setPrinterAssignMode] = useState<"stock" | "department" | "person">(initialPrinterMode);
+  const [printerDepartment, setPrinterDepartment] = useState(initial?.assignedDepartment ?? departments[0] ?? "");
+  const [printerEmployeeId, setPrinterEmployeeId] = useState(initial?.employeeId ?? activeEmployees[0]?.id ?? "");
+  const [printerRoom, setPrinterRoom] = useState(initial?.type === "Printer" ? (initial?.location ?? "") : "");
   const [specs, setSpecs] = useState<Record<string, string>>(initial?.specs ?? {});
-  const field = (key: keyof typeof form) => ({ value: form[key], onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm({ ...form, [key]: event.target.value }) });
+
+  const field = (key: keyof typeof form) => ({
+    value: form[key],
+    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
+      setForm({ ...form, [key]: event.target.value }),
+  });
+
   const category = form.category as keyof typeof ASSET_TYPES;
   const dynamicFields = ASSET_SPEC_FIELDS[form.type] ?? [];
   const isNonIt = form.category === "Non-IT Asset";
+  const isLocationOnly = isLocationOnlyAssetType(form.type);
+  const isMonitor = isMonitorAssetType(form.type);
+  const isPrinter = isPrinterAssetType(form.type);
   const furnitureOptions = FURNITURE_IMAGE_OPTIONS.filter((option) => option.type === form.type);
   const isFurniture = furnitureOptions.length > 0;
-  return <form className="form-grid" onSubmit={(event) => { event.preventDefault(); const prefix = form.category === "IT Asset" ? "IT" : "NIT"; onSave({ ...initial, id: initial?.id ?? crypto.randomUUID(), code: initial?.code ?? `${prefix}-${form.type.slice(0, 3).toUpperCase()}-${String(Date.now()).slice(-4)}`, ...form, serial: isNonIt ? "" : form.serial, location: isNonIt ? form.location : undefined, specs, category: form.category as Asset["category"], status: initial?.status ?? "Available", updatedAt: today() }); }}>
-    <label>Asset category<select value={form.category} onChange={(event) => { const nextCategory = event.target.value as keyof typeof ASSET_TYPES; const nextType = ASSET_TYPES[nextCategory][0]; const furniture = FURNITURE_IMAGE_OPTIONS.find((option) => option.type === nextType); setForm({ ...form, category: nextCategory, type: nextType, serial: nextCategory === "Non-IT Asset" ? "" : form.serial, imageKey: furniture?.key ?? "", model: furniture?.model ?? "", name: furniture ? `${furniture.label} - ${furniture.model}` : form.name }); setSpecs({}); }}><option>IT Asset</option><option>Non-IT Asset</option></select></label>
-    <label>Item type<select value={form.type} onChange={(event) => { const nextType = event.target.value; const furniture = FURNITURE_IMAGE_OPTIONS.find((option) => option.type === nextType); setForm({ ...form, type: nextType, imageKey: furniture?.key ?? "", model: furniture?.model ?? "", name: furniture ? `${furniture.label} - ${furniture.model}` : form.name }); setSpecs({}); }}>{ASSET_TYPES[category].map((type) => <option key={type}>{type}</option>)}</select></label>
-    {isFurniture && <fieldset className="furniture-picker full"><legend>Select {form.type} design</legend><p>The selected image will appear throughout AssetFlow and in Excel exports.</p><div>{furnitureOptions.map((option) => <button type="button" className={form.imageKey === option.key ? "selected" : ""} aria-pressed={form.imageKey === option.key} key={option.key} onClick={() => setForm({ ...form, imageKey: option.key, model: option.model, name: `${option.label} - ${option.model}` })}><img src={option.src} alt={`${option.label} ${option.model}`} /><span><strong>{option.label}</strong><small>{option.model}</small></span>{form.imageKey === option.key && <Check size={16} />}</button>)}</div></fieldset>}
-    <label className="full">Display name<input required placeholder="e.g. Lenovo ThinkPad E14" {...field("name")} /></label>
-    <label>Brand<input required placeholder="Lenovo" {...field("brand")} /></label>
-    <label>Model<input required readOnly={isFurniture} placeholder="ThinkPad E14 Gen 5" {...field("model")} /></label>
-    {isNonIt ? <label className="full">Current location<select required {...field("location")}><option>Central Stock</option>{departments.map((department) => <option key={department}>{department}</option>)}</select></label> : <label className="full">Serial number<input required placeholder="Manufacturer or company serial number" {...field("serial")} /></label>}
-    {dynamicFields.length > 0 && <div className="asset-spec-heading full"><strong>{form.type} specifications</strong><span>Fields change automatically for the selected asset type.</span></div>}
-    {dynamicFields.map((spec) => <label key={spec.key}>{spec.label}{spec.options ? <select required value={specs[spec.key] ?? ""} onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })}><option value="">Select {spec.label.toLowerCase()}</option>{spec.options.map((option) => <option key={option}>{option}</option>)}</select> : <input required value={specs[spec.key] ?? ""} placeholder={spec.placeholder} onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })} />}</label>)}
-    <label>Condition<select {...field("condition")}><option>Excellent</option><option>Good</option><option>Fair</option><option>Repair</option></select></label>
-    <label className="full">Additional notes<textarea placeholder="Warranty, accessories or any other information…" {...field("details")} /></label>
-    <FormActions text={initial ? "Update asset" : "Add asset"} />
-  </form>;
+
+  return (
+    <form
+      className="form-grid"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const prefix = form.category === "IT Asset" ? "IT" : "NIT";
+        const resolvedLocation =
+          form.location === "__custom__" ? form.customLocation.trim() : form.location.trim();
+
+        let nextLocation: string | undefined = isNonIt ? (resolvedLocation || "Central Stock") : undefined;
+        let nextAllocationType: AssetAllocationType | undefined = initial?.allocationType;
+        let nextAssignedDepartment: string | undefined = initial?.assignedDepartment;
+        let nextEmployeeId: string | undefined = initial?.employeeId;
+        let nextCustodianName: string | undefined = initial?.custodianName;
+        let nextCustodianDepartment: string | undefined = initial?.custodianDepartment;
+        let nextStatus: AssetStatus = initial?.status ?? "Available";
+
+        if (isLocationOnly) {
+          const finalLoc = resolvedLocation || "Central Stock";
+          nextLocation = finalLoc;
+          nextEmployeeId = undefined;
+          nextCustodianName = undefined;
+          nextCustodianDepartment = undefined;
+          nextAssignedDepartment = undefined;
+          nextAllocationType = finalLoc !== "Central Stock" ? "location" : undefined;
+          if (nextStatus !== "In repair" && nextStatus !== "Retired") {
+            nextStatus = finalLoc !== "Central Stock" ? "Assigned" : "Available";
+          }
+        } else if (isPrinter) {
+          nextLocation = printerRoom.trim() || undefined;
+          if (printerAssignMode === "department" && printerDepartment) {
+            nextAllocationType = "department";
+            nextAssignedDepartment = printerDepartment;
+            nextCustodianDepartment = printerDepartment;
+            nextEmployeeId = undefined;
+            nextCustodianName = undefined;
+            if (nextStatus !== "In repair" && nextStatus !== "Retired") nextStatus = "Assigned";
+          } else if (printerAssignMode === "person" && printerEmployeeId) {
+            const emp = employees.find((e) => e.id === printerEmployeeId);
+            nextAllocationType = "person";
+            nextAssignedDepartment = undefined;
+            nextEmployeeId = printerEmployeeId;
+            nextCustodianName = emp?.name;
+            nextCustodianDepartment = emp?.department;
+            if (nextStatus !== "In repair" && nextStatus !== "Retired") nextStatus = "Assigned";
+          } else {
+            nextAllocationType = undefined;
+            nextAssignedDepartment = undefined;
+            nextEmployeeId = undefined;
+            nextCustodianName = undefined;
+            nextCustodianDepartment = undefined;
+            if (nextStatus !== "In repair" && nextStatus !== "Retired") nextStatus = "Available";
+          }
+        } else if (initial?.allocationType === "location" || initial?.allocationType === "department") {
+          nextAllocationType = nextEmployeeId ? "person" : undefined;
+          nextAssignedDepartment = undefined;
+          if (!nextEmployeeId && nextStatus === "Assigned") {
+            nextStatus = "Available";
+          }
+        }
+
+        const typeCodePrefix =
+          form.type === "Classroom / Location Monitor" ? "CLM" :
+          form.type === "Google Chromecast" ? "GCC" :
+          form.type === "Printer" ? "PRN" :
+          form.type.slice(0, 3).toUpperCase();
+
+        onSave({
+          ...initial,
+          id: initial?.id ?? crypto.randomUUID(),
+          code: initial?.code ?? `${prefix}-${typeCodePrefix}-${String(Date.now()).slice(-4)}`,
+          category: form.category as Asset["category"],
+          type: form.type,
+          name: form.name,
+          brand: form.brand,
+          model: form.model,
+          serial: isNonIt ? "" : form.serial,
+          location: nextLocation,
+          allocationType: nextAllocationType,
+          assignedDepartment: nextAssignedDepartment,
+          employeeId: nextEmployeeId,
+          custodianName: nextCustodianName,
+          custodianDepartment: nextCustodianDepartment,
+          condition: form.condition,
+          verified: form.verified === "Yes",
+          details: form.details,
+          imageKey: form.imageKey,
+          specs,
+          status: nextStatus,
+          updatedAt: today(),
+        });
+      }}
+    >
+      <label>
+        Asset category
+        <select
+          value={form.category}
+          onChange={(event) => {
+            const nextCategory = event.target.value as keyof typeof ASSET_TYPES;
+            const nextType = ASSET_TYPES[nextCategory][0];
+            const furniture = FURNITURE_IMAGE_OPTIONS.find((option) => option.type === nextType);
+            setForm({
+              ...form,
+              category: nextCategory,
+              type: nextType,
+              serial: nextCategory === "Non-IT Asset" ? "" : form.serial,
+              location: nextCategory === "Non-IT Asset" ? (departments[0] ?? "Central Stock") : "Central Stock",
+              imageKey: furniture?.key ?? "",
+              model: furniture?.model ?? "",
+              name: furniture ? `${furniture.label} - ${furniture.model}` : form.name,
+            });
+            setSpecs({});
+          }}
+        >
+          <option>IT Asset</option>
+          <option>Non-IT Asset</option>
+        </select>
+      </label>
+
+      <label>
+        Item type
+        <select
+          value={form.type}
+          onChange={(event) => {
+            const nextType = event.target.value;
+            const furniture = FURNITURE_IMAGE_OPTIONS.find((option) => option.type === nextType);
+            const preserveMonitorSpecs = isMonitorAssetType(form.type) && isMonitorAssetType(nextType);
+            setForm({
+              ...form,
+              type: nextType,
+              imageKey: furniture?.key ?? "",
+              model: furniture?.model ?? (preserveMonitorSpecs ? form.model : ""),
+              name: furniture ? `${furniture.label} - ${furniture.model}` : form.name,
+            });
+            if (!preserveMonitorSpecs) setSpecs({});
+          }}
+        >
+          {ASSET_TYPES[category].map((type) => <option key={type}>{type}</option>)}
+        </select>
+      </label>
+
+      {isMonitor && (
+        <div className="allocation-panel full">
+          <div className="allocation-panel-head">
+            <Monitor size={17} />
+            <div>
+              <strong>Monitor division (2 parts)</strong>
+              <span>Choose whether this monitor is assigned to an individual employee or fixed to a classroom / location.</span>
+            </div>
+          </div>
+          <div className="allocation-mode-grid">
+            <button
+              type="button"
+              className={form.type === "Monitor" ? "allocation-mode-btn selected" : "allocation-mode-btn"}
+              onClick={() => setForm({ ...form, type: "Monitor" })}
+            >
+              <Users size={16} />
+              <div>
+                <strong>Staff / Employee Monitor</strong>
+                <small>Standard monitor assignable to a specific person</small>
+              </div>
+            </button>
+            <button
+              type="button"
+              className={form.type === "Classroom / Location Monitor" ? "allocation-mode-btn selected" : "allocation-mode-btn"}
+              onClick={() => setForm({ ...form, type: "Classroom / Location Monitor" })}
+            >
+              <MapPin size={16} />
+              <div>
+                <strong>Classroom / Location Monitor</strong>
+                <small>Allocated directly to a classroom or room — not a person</small>
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isFurniture && (
+        <fieldset className="furniture-picker full">
+          <legend>Select {form.type} design</legend>
+          <p>The selected image will appear throughout AssetFlow and in Excel exports.</p>
+          <div>
+            {furnitureOptions.map((option) => (
+              <button
+                type="button"
+                className={form.imageKey === option.key ? "selected" : ""}
+                aria-pressed={form.imageKey === option.key}
+                key={option.key}
+                onClick={() => setForm({ ...form, imageKey: option.key, model: option.model, name: `${option.label} - ${option.model}` })}
+              >
+                <img src={option.src} alt={`${option.label} ${option.model}`} />
+                <span><strong>{option.label}</strong><small>{option.model}</small></span>
+                {form.imageKey === option.key && <Check size={16} />}
+              </button>
+            ))}
+          </div>
+        </fieldset>
+      )}
+
+      <label className="full">
+        Display name
+        <input
+          required
+          placeholder={
+            form.type === "Google Chromecast"
+              ? "e.g. Google Chromecast - Lecture Hall 01"
+              : form.type === "Classroom / Location Monitor"
+                ? "e.g. Samsung 55\" Display - Lecture Hall 01"
+                : form.type === "Printer"
+                  ? "e.g. HP LaserJet Pro M404dn - Finance"
+                  : "e.g. Lenovo ThinkPad E14"
+          }
+          {...field("name")}
+        />
+      </label>
+      <label>Brand<input required placeholder={form.type === "Google Chromecast" ? "Google" : form.type === "Printer" ? "HP / Canon / Brother" : "Lenovo"} {...field("brand")} /></label>
+      <label>Model<input required readOnly={isFurniture} placeholder={form.type === "Printer" ? "LaserJet Pro M404dn" : form.type === "Google Chromecast" ? "Chromecast with Google TV 4K" : "ThinkPad E14 Gen 5"} {...field("model")} /></label>
+
+      {isNonIt ? (
+        <label className="full">
+          Current location
+          <select required {...field("location")}>
+            <option>Central Stock</option>
+            {departments.map((department) => <option key={department}>{department}</option>)}
+          </select>
+        </label>
+      ) : (
+        <label className="full">
+          Serial number
+          <input required placeholder="Manufacturer or company serial number" {...field("serial")} />
+        </label>
+      )}
+
+      {isLocationOnly && (
+        <div className="allocation-panel full">
+          <div className="location-notice-box" style={{ marginBottom: "11px" }}>
+            <MapPin size={17} />
+            <div>
+              <strong>Location-allocated IT asset (not assigned to a person)</strong>
+              <span>Allocate this {form.type} to a specific classroom, lab, or room. Choosing a location marks it as allocated to that location; choosing Central Stock keeps it available.</span>
+            </div>
+          </div>
+          <div className="form-grid">
+            <label className={form.location === "__custom__" ? "" : "full"}>
+              Classroom / Location
+              <select required {...field("location")}>
+                <option value="Central Stock">Central Stock (Unallocated)</option>
+                {groupLocationsByBuilding(locations).map(([building, rooms]) => (
+                  <optgroup key={building} label={building}>
+                    {rooms.map((room) => <option key={room.value} value={room.value}>{room.label}</option>)}
+                  </optgroup>
+                ))}
+                <optgroup label="Departments">
+                  {departments.map((dept) => <option key={dept} value={dept}>{dept}</option>)}
+                </optgroup>
+                <option value="__custom__">+ Type a custom location…</option>
+              </select>
+            </label>
+            {form.location === "__custom__" && (
+              <label>
+                Custom classroom / location name
+                <input
+                  required
+                  placeholder="e.g. Building 2 (New) - Classroom 302"
+                  value={form.customLocation}
+                  onChange={(e) => setForm({ ...form, customLocation: e.target.value })}
+                />
+              </label>
+            )}
+          </div>
+        </div>
+      )}
+
+      {isPrinter && (
+        <div className="allocation-panel full">
+          <div className="allocation-panel-head">
+            <Printer size={17} />
+            <div>
+              <strong>Printer assignment</strong>
+              <span>Assign this printer to a specific department, a specific person, or keep it in stock.</span>
+            </div>
+          </div>
+          <div className="allocation-mode-grid three-col" style={{ marginBottom: "11px" }}>
+            <button
+              type="button"
+              className={printerAssignMode === "department" ? "allocation-mode-btn selected" : "allocation-mode-btn"}
+              onClick={() => setPrinterAssignMode("department")}
+            >
+              <Building2 size={15} />
+              <div>
+                <strong>Department</strong>
+                <small>Shared department printer</small>
+              </div>
+            </button>
+            <button
+              type="button"
+              className={printerAssignMode === "person" ? "allocation-mode-btn selected" : "allocation-mode-btn"}
+              onClick={() => setPrinterAssignMode("person")}
+            >
+              <Users size={15} />
+              <div>
+                <strong>Specific person</strong>
+                <small>Assigned to an employee</small>
+              </div>
+            </button>
+            <button
+              type="button"
+              className={printerAssignMode === "stock" ? "allocation-mode-btn selected" : "allocation-mode-btn"}
+              onClick={() => setPrinterAssignMode("stock")}
+            >
+              <Package size={15} />
+              <div>
+                <strong>Central stock</strong>
+                <small>Available / unassigned</small>
+              </div>
+            </button>
+          </div>
+          <div className="form-grid">
+            {printerAssignMode === "department" && (
+              <label>
+                Assigned department
+                <select required value={printerDepartment} onChange={(e) => setPrinterDepartment(e.target.value)}>
+                  {departments.map((dept) => <option key={dept} value={dept}>{dept}</option>)}
+                </select>
+              </label>
+            )}
+            {printerAssignMode === "person" && (
+              <label>
+                Assigned employee
+                <select required value={printerEmployeeId} onChange={(e) => setPrinterEmployeeId(e.target.value)}>
+                  <option value="">Select employee</option>
+                  {activeEmployees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>{emp.name} · {emp.department} ({emp.empNo})</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label className={printerAssignMode === "stock" ? "full" : ""}>
+              Room / physical location (optional)
+              <input
+                list="printer-room-suggestions"
+                placeholder="e.g. Ground Floor Copy Room / Reception Desk"
+                value={printerRoom}
+                onChange={(e) => setPrinterRoom(e.target.value)}
+              />
+              <datalist id="printer-room-suggestions">
+                {locations.map((loc) => <option key={loc} value={loc} />)}
+              </datalist>
+            </label>
+          </div>
+        </div>
+      )}
+
+      {dynamicFields.length > 0 && (
+        <div className="asset-spec-heading full">
+          <strong>{form.type} specifications</strong>
+          <span>Fields change automatically for the selected asset type.</span>
+        </div>
+      )}
+      {dynamicFields.map((spec) => (
+        <label key={spec.key}>
+          {spec.label}
+          {spec.options ? (
+            <select
+              required={spec.required !== false}
+              value={specs[spec.key] ?? ""}
+              onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })}
+            >
+              <option value="">Select {spec.label.toLowerCase()}</option>
+              {spec.options.map((option) => <option key={option}>{option}</option>)}
+            </select>
+          ) : (
+            <input
+              required={spec.required !== false}
+              value={specs[spec.key] ?? ""}
+              placeholder={spec.placeholder}
+              onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })}
+            />
+          )}
+        </label>
+      ))}
+      <label>Condition<select {...field("condition")}><option>Excellent</option><option>Good</option><option>Fair</option><option>Repair</option></select></label>
+      <label>Asset verified (Yes/No)<select {...field("verified")}><option value="No">No</option><option value="Yes">Yes</option></select></label>
+      <label className="full">Additional notes<textarea placeholder="Warranty, accessories or any other information…" {...field("details")} /></label>
+      <FormActions text={initial ? "Update asset" : "Add asset"} />
+    </form>
+  );
 }
 
 function EmployeeForm({ departments, onSave, initial }: { departments: string[]; onSave: (employee: Employee) => void; initial?: Employee }) {
@@ -957,7 +2218,8 @@ function AssignForm({
   const [selected, setSelected] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  const available = assets.filter((asset) => asset.status === "Available");
+  const available = assets.filter((asset) => asset.status === "Available" && !isLocationOnlyAssetType(asset.type));
+  const locationOnlyInStock = assets.filter((asset) => asset.status === "Available" && isLocationOnlyAssetType(asset.type)).length;
 
   return (
     <form
@@ -1026,6 +2288,11 @@ function AssignForm({
       </label>
 
       <p className="field-heading">Select one or more available items ({selected.length} selected)</p>
+      {locationOnlyInStock > 0 && (
+        <p className="department-note" style={{ marginTop: "-4px", marginBottom: "10px" }}>
+          Note: {locationOnlyInStock} location-allocated item{locationOnlyInStock === 1 ? "" : "s"} (Classroom / Location Monitors or Google Chromecasts) are hidden here because they are allocated to a classroom / location rather than a person.
+        </p>
+      )}
       <div className="check-list">
         {available.map((asset) => {
           const furniture = furnitureImageForAsset(asset);
@@ -1255,7 +2522,7 @@ function PrintableDocument({ type, employees, assets, initialEmployeeId = "", in
   const owned = initialAssetIds.length ? contextualAssets : assets.filter((asset) => asset.employeeId === employeeId);
   const included = owned.filter((asset) => selected.includes(asset.id));
   const returnDocument = type.includes("Return") || type.includes("Clearance");
-  return <div><div className="document-controls"><label>Employee<select value={employeeId} disabled={Boolean(initialEmployeeId)} onChange={(event) => { const nextId = event.target.value; setEmployeeId(nextId); setSelected(assets.filter((asset) => asset.employeeId === nextId).map((asset) => asset.id)); }}>{employees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><button className="button button-primary" disabled={!employee || !included.length} onClick={() => window.print()}><Printer size={17} />Print / Save PDF</button></div><div className="document-item-picker"><div><strong>Select items for this document</strong><span>{selected.length} of {owned.length} included</span></div><div>{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} />{asset.name}<small>{asset.code}</small></label>)}</div></div><article className="print-document"><div className="document-accent" /><header><div><strong>ASSETFLOW</strong><span>Company Asset Management · Official Record</span></div><p>{type}</p></header><div className="document-title"><span>{type.toUpperCase()}</span><h1>{employee?.name || "Select an employee"}</h1><p>{employee ? `${employee.empNo} · ${employee.designation} · ${employee.department}` : "No employee selected"}</p></div><div className="document-meta"><span>Document date<strong>{new Date().toLocaleDateString("en-GB")}</strong></span><span>Reference<strong>AF-{employee?.empNo || "UNASSIGNED"}-{type.replaceAll(" ", "-").toUpperCase()}</strong></span><span>Items covered<strong>{included.length}</strong></span></div><table><thead><tr><th>#</th><th>Asset / item</th><th>Asset code</th><th>Serial / location</th><th>Condition</th></tr></thead><tbody>{included.map((asset, index) => <tr key={asset.id}><td>{String(index + 1).padStart(2, "0")}</td><td><strong>{asset.name}</strong><small>{asset.details}</small></td><td>{asset.code}</td><td>{asset.serial || asset.location || "—"}</td><td><span className="document-condition">{asset.condition}</span></td></tr>)}</tbody></table><p className="document-statement">{returnDocument ? "The assets listed above have been returned to the company and verified by the responsible department. Any exception or damage must be recorded before final employee clearance is approved." : "I acknowledge receipt and responsibility for the company assets listed above. I agree to use them only for authorised company work, take reasonable care of them, and return them in good condition when requested."}</p><div className="signature-grid"><span>Employee signature<small>Name, signature & date</small></span><span>Issued / received by<small>Asset Administration</small></span><span>Authorised by<small>Department Head</small></span></div><footer><strong>AssetFlow verified document</strong><span>Generated from the live company asset register · {new Date().toLocaleString("en-GB")}</span></footer></article></div>;
+  return <div><div className="document-controls"><label>Employee<select value={employeeId} disabled={Boolean(initialEmployeeId)} onChange={(event) => { const nextId = event.target.value; setEmployeeId(nextId); setSelected(assets.filter((asset) => asset.employeeId === nextId).map((asset) => asset.id)); }}>{employees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><button className="button button-primary" disabled={!employee || !included.length} onClick={() => window.print()}><Printer size={17} />Print / Save PDF</button></div><div className="document-item-picker"><div><strong>Select items for this document</strong><span>{selected.length} of {owned.length} included</span></div><div>{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} />{asset.name}<small>{asset.code}</small></label>)}</div></div><article className="print-document"><div className="document-accent" /><header><div><strong>ASSETFLOW</strong><span>Company Asset Management · Official Record</span></div><p>{type}</p></header><div className="document-title"><span>{type.toUpperCase()}</span><h1>{employee?.name || "Select an employee"}</h1><p>{employee ? `${employee.empNo} · ${employee.designation} · ${employee.department}` : "No employee selected"}</p></div><div className="document-meta"><span>Document date<strong>{new Date().toLocaleDateString("en-GB")}</strong></span><span>Reference<strong>AF-{employee?.empNo || "UNASSIGNED"}-{type.replaceAll(" ", "-").toUpperCase()}</strong></span><span>Items covered<strong>{included.length}</strong></span></div><table><thead><tr><th>#</th><th>Asset / item</th><th>Asset code</th><th>Serial / location</th><th>Condition</th></tr></thead><tbody>{included.map((asset, index) => { const chips = getAssetKeySpecChips(asset); return <tr key={asset.id}><td>{String(index + 1).padStart(2, "0")}</td><td><strong>{asset.name}</strong><small>{[chips.join(" · "), asset.details].filter(Boolean).join(" — ")}</small></td><td>{asset.code}</td><td>{asset.serial || asset.location || "—"}</td><td><span className="document-condition">{asset.condition}</span></td></tr>; })}</tbody></table><p className="document-statement">{returnDocument ? "The assets listed above have been returned to the company and verified by the responsible department. Any exception or damage must be recorded before final employee clearance is approved." : "I acknowledge receipt and responsibility for the company assets listed above. I agree to use them only for authorised company work, take reasonable care of them, and return them in good condition when requested."}</p><div className="signature-grid"><span>Employee signature<small>Name, signature & date</small></span><span>Issued / received by<small>Asset Administration</small></span><span>Authorised by<small>Department Head</small></span></div><footer><strong>AssetFlow verified document</strong><span>Generated from the live company asset register · {new Date().toLocaleString("en-GB")}</span></footer></article></div>;
 }
 
 function QrBatch({ assets, employees, departments, employeeMap }: { assets: Asset[]; employees: Employee[]; departments: string[]; employeeMap: Record<string, Employee> }) {
@@ -1270,7 +2537,7 @@ function QrBatch({ assets, employees, departments, employeeMap }: { assets: Asse
     if (category !== "All" && asset.category !== category) return false;
     if (scope === "employee") return asset.employeeId === employeeId;
     if (scope === "department") {
-      const assetDepartment = asset.employeeId ? employeeMap[asset.employeeId]?.department : asset.custodianDepartment || asset.location;
+      const assetDepartment = asset.employeeId ? employeeMap[asset.employeeId]?.department : asset.assignedDepartment || asset.custodianDepartment || asset.location;
       return assetDepartment === department;
     }
     return true;
@@ -1287,8 +2554,8 @@ function QrBatch({ assets, employees, departments, employeeMap }: { assets: Asse
       <div><button className="button button-secondary" onClick={() => setSelected((rows) => filtered.every((asset) => rows.includes(asset.id)) ? rows.filter((id) => !filtered.some((asset) => asset.id === id)) : Array.from(new Set([...rows, ...filtered.map((asset) => asset.id)])))}><Check size={16} />Select / clear group</button><button className="button button-primary" disabled={!visible.length} onClick={() => window.print()}><Printer size={17} />Print {visible.length} labels</button></div>
     </div>
     <div className="qr-batch-tip"><QrCode size={19} /><div><strong>Small labels for every item</strong><p>Select a department first to narrow the employee list, then choose the label size that fits the item. This print run uses {labelsPerPage} labels per A4 page.</p></div></div>
-    <div className="qr-select-list">{filtered.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial || asset.location || "No serial"}</small></span><em>{asset.employeeId ? employeeMap[asset.employeeId]?.name : "In stock"}</em></label>)}</div>
-    <section className="qr-print-sheet">{Array.from({ length: Math.ceil(visible.length / labelsPerPage) }, (_, pageIndex) => <div className={`qr-print-page qr-size-${labelSize}`} key={pageIndex}>{visible.slice(pageIndex * labelsPerPage, pageIndex * labelsPerPage + labelsPerPage).map((asset) => <QrLabel key={asset.id} asset={asset} owner={asset.employeeId ? employeeMap[asset.employeeId]?.name : undefined} />)}</div>)}</section>
+    <div className="qr-select-list">{filtered.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} /><span><strong>{asset.name}</strong><small>{asset.code} · {asset.serial || asset.location || "No serial"}</small></span><em>{asset.employeeId ? employeeMap[asset.employeeId]?.name : asset.assignedDepartment || asset.location || "In stock"}</em></label>)}</div>
+    <section className="qr-print-sheet">{Array.from({ length: Math.ceil(visible.length / labelsPerPage) }, (_, pageIndex) => <div className={`qr-print-page qr-size-${labelSize}`} key={pageIndex}>{visible.slice(pageIndex * labelsPerPage, pageIndex * labelsPerPage + labelsPerPage).map((asset) => <QrLabel key={asset.id} asset={asset} owner={asset.employeeId ? employeeMap[asset.employeeId]?.name : asset.assignedDepartment} />)}</div>)}</section>
   </div>;
 }
 
@@ -1376,5 +2643,5 @@ function FormActions({ text, disabled = false }: { text: string; disabled?: bool
 }
 
 function modalTitle(modal: string) {
-  return { asset: "Add a new asset", employee: "Add employee", employeeEdit: "Edit employee details", departments: "Manage departments", assign: "Assign assets", return: "Return assets", repair: "Record asset repair", request: "Submit requirement", document: "Generate document", qrBatch: "Batch QR label printing", schedule: "Requirement form window" }[modal] || modal;
+  return { asset: "Add a new asset", employee: "Add employee", employeeEdit: "Edit employee details", departments: "Manage departments", locations: "Manage classrooms & locations", toner: "Add toner SKU", tonerStock: "Update toner stock", assign: "Assign assets", return: "Return assets", repair: "Record asset repair", request: "Submit requirement", document: "Generate document", qrBatch: "Batch QR label printing", schedule: "Requirement form window" }[modal] || modal;
 }

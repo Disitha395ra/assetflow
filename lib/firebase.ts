@@ -165,6 +165,7 @@ export type RequirementWindowRecord = {
   isOpen: boolean;
   periodLabel: string;
   departments?: string[];
+  locations?: string[];
 };
 
 export const DEFAULT_REQUIREMENT_WINDOW: RequirementWindowRecord = {
@@ -194,6 +195,7 @@ export async function getRequirementWindow() {
   const currentDepartments = cleanDepartments(data.departments);
   const legacyDepartments = cleanDepartments(legacySnapshot.data()?.items);
   const departments = currentDepartments.length ? currentDepartments : legacyDepartments;
+  const locations = cleanDepartments(data.locations);
 
   // Recheck inside the transaction so legacy data cannot overwrite a newer list.
   if (!currentDepartments.length && legacyDepartments.length && isAdminEmail(auth?.currentUser?.email)) {
@@ -216,6 +218,7 @@ export async function getRequirementWindow() {
     opensAt: toInputDate(data.opensAt),
     closesAt: toInputDate(data.closesAt),
     ...(departments.length ? { departments } : {}),
+    ...(locations.length ? { locations } : {}),
   } as RequirementWindowRecord;
 }
 

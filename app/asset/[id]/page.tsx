@@ -5,19 +5,23 @@
 import {
   ArrowLeftRight,
   Building2,
+  Cast,
   CheckCircle2,
   Clock3,
   History,
+  MapPin,
   Monitor,
   PackageCheck,
+  Printer,
   ShieldCheck,
+  Smartphone,
   UserRound,
   Wrench,
 } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { firebaseReady, getRecord, watchCollection } from "@/lib/firebase";
-import { furnitureImageForAsset } from "@/lib/catalog";
+import { formatSpecLabel, furnitureImageForAsset, isLocationOnlyAssetType } from "@/lib/catalog";
 
 type PublicAsset = {
   id: string;
@@ -29,8 +33,11 @@ type PublicAsset = {
   model: string;
   serial: string;
   location?: string;
+  allocationType?: "person" | "location" | "department";
+  assignedDepartment?: string;
   status: string;
   condition: string;
+  verified?: boolean;
   details: string;
   specs?: Record<string, string>;
   updatedAt: string;
@@ -67,6 +74,14 @@ export default function PublicAssetPage() {
   if (loading) return <PublicState title="Loading verified asset record…" />;
   if (!asset) return <PublicState title="Asset record not found" copy="This QR label may be old or the asset has been removed." />;
   const furniture = furnitureImageForAsset(asset);
+  const isLocationAsset = asset.allocationType === "location" || isLocationOnlyAssetType(asset.type);
+  const isDepartmentAsset = asset.allocationType === "department" && Boolean(asset.assignedDepartment);
+
+  const heroIcon =
+    asset.type === "Printer" ? <Printer size={38} /> :
+    asset.type === "Google Chromecast" ? <Cast size={38} /> :
+    asset.type === "Mobile Phone" ? <Smartphone size={38} /> :
+    <Monitor size={38} />;
 
   return (
     <main className="public-asset-page">
@@ -75,7 +90,7 @@ export default function PublicAssetPage() {
         <span><CheckCircle2 size={15} />Verified company record</span>
       </header>
       <section className="public-asset-hero">
-        <div className={furniture ? "public-asset-icon public-furniture-image" : "public-asset-icon"}>{furniture ? <img src={furniture.src} alt={`${furniture.label} ${furniture.model}`} /> : <Monitor size={38} />}</div>
+        <div className={furniture ? "public-asset-icon public-furniture-image" : "public-asset-icon"}>{furniture ? <img src={furniture.src} alt={`${furniture.label} ${furniture.model}`} /> : heroIcon}</div>
         <div>
           <span className="public-kicker">{asset.code}</span>
           <h1>{asset.name}</h1>
@@ -90,10 +105,13 @@ export default function PublicAssetPage() {
             <div className="public-card-title"><PackageCheck size={18} /><div><h2>Asset description</h2><p>Identity and technical information</p></div></div>
             <div className="public-detail-grid">
               {asset.category === "Non-IT Asset" ? <label>Current location<strong>{asset.location || asset.custodianDepartment || "Not recorded"}</strong></label> : <label>Serial number<strong>{asset.serial || "Not recorded"}</strong></label>}
+              {asset.category === "IT Asset" && asset.location && <label>Classroom / Location<strong>{asset.location}</strong></label>}
+              {asset.assignedDepartment && <label>Assigned department<strong>{asset.assignedDepartment}</strong></label>}
               <label>Category<strong>{asset.category}</strong></label>
               <label>Asset type<strong>{asset.type}</strong></label>
               <label>Condition<strong>{asset.condition}</strong></label>
-              {Object.entries(asset.specs ?? {}).filter(([, value]) => value).map(([key, value]) => <label key={key}>{key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase())}<strong>{value}</strong></label>)}
+              <label>Asset verified<strong>{asset.verified ? "Yes" : "No"}</strong></label>
+              {Object.entries(asset.specs ?? {}).filter(([, value]) => value).map(([key, value]) => <label key={key}>{formatSpecLabel(key)}<strong>{value}</strong></label>)}
             </div>
             <div className="public-spec">{asset.details || "No additional specification recorded."}</div>
           </article>
@@ -101,7 +119,7 @@ export default function PublicAssetPage() {
           <article className="public-card public-history-card">
             <div className="public-card-title"><History size={18} /><div><h2>Lifecycle record</h2><p>Assignment, return and repair history</p></div></div>
             <div className="public-timeline">
-              {history.length ? history.sort((a, b) => b.date.localeCompare(a.date)).map((event) => (
+              {history.length ? [...history].sort((a, b) => b.date.localeCompare(a.date)).map((event) => (
                 <div key={event.id}>
                   <span>{event.type === "Repair" ? <Wrench size={15} /> : <ArrowLeftRight size={15} />}</span>
                   <div><strong>{event.type}</strong><p>{event.employeeName || "Asset Administration"}{event.department ? ` · ${event.department}` : ""}</p><small>{event.note}</small></div>
@@ -115,7 +133,31 @@ export default function PublicAssetPage() {
         <aside>
           <article className="public-card public-custodian">
             <div className="public-card-title"><UserRound size={18} /><div><h2>Current custodian</h2><p>Live assignment status</p></div></div>
-            {asset.custodianName ? <><span className="public-avatar">{asset.custodianName.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><h3>{asset.custodianName}</h3><p><Building2 size={14} />{asset.custodianDepartment}</p></> : <div className="public-stock"><PackageCheck size={22} /><strong>Available in stock</strong><span>{asset.location ? `Current location: ${asset.location}` : "This item is currently in Central Stock."}</span></div>}
+            {asset.custodianName ? (
+              <>
+                <span className="public-avatar">{asset.custodianName.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span>
+                <h3>{asset.custodianName}</h3>
+                <p><Building2 size={14} />{asset.custodianDepartment}</p>
+              </>
+            ) : isDepartmentAsset ? (
+              <>
+                <span className="public-avatar"><Building2 size={24} /></span>
+                <h3>{asset.assignedDepartment}</h3>
+                <p><Building2 size={14} />Assigned to department{asset.location ? ` · ${asset.location}` : ""}</p>
+              </>
+            ) : isLocationAsset && asset.location && asset.location !== "Central Stock" ? (
+              <>
+                <span className="public-avatar"><MapPin size={24} /></span>
+                <h3>{asset.location}</h3>
+                <p><MapPin size={14} />Allocated to classroom / location</p>
+              </>
+            ) : (
+              <div className="public-stock">
+                <PackageCheck size={22} />
+                <strong>Available in stock</strong>
+                <span>{asset.location ? `Current location: ${asset.location}` : "This item is currently in Central Stock."}</span>
+              </div>
+            )}
           </article>
           <article className="public-verification">
             <ShieldCheck size={22} />
