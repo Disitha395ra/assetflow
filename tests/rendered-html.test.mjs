@@ -276,5 +276,29 @@ test("generates 6 dedicated styled Excel reports sorted A-Z by department with r
   assert.match(css, /\.structured-report-card/);
 });
 
+test("uses atomic Firestore transactions, multi-token search, orange repair badges, and printable movement history", async () => {
+  const [firebase, catalog, page, css] = await Promise.all([
+    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/catalog.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(firebase, /commitAssetMovementsBatch/);
+  assert.match(firebase, /applyTonerStockTransaction/);
+  assert.match(firebase, /syncEmployeeCustodianOnAssets/);
+  assert.match(catalog, /effectiveAssetStatus/);
+  assert.match(catalog, /matchesSearchQuery/);
+  assert.match(page, /applyTonerStockTransaction/);
+  assert.match(page, /commitAssetMovementsBatch/);
+  assert.match(page, /watchRequirementWindow/);
+  assert.match(page, /ASSET MOVEMENT HISTORY/);
+  assert.match(page, /One classroom \/ location/);
+  assert.match(page, /Assets &amp; Toner Stock Overview/);
+  assert.match(css, /\.available-asset-condition\.condition-repair/);
+  assert.match(css, /\.document-condition\.condition-repair/);
+});
+
+
 
 

@@ -50,6 +50,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ADMIN_EMAIL,
   DEFAULT_REQUIREMENT_WINDOW,
+  applyTonerStockTransaction,
+  commitAssetMovementsBatch,
   deleteAssetRecord,
   firebaseReady,
   getRequirementWindow,
@@ -59,9 +61,11 @@ import {
   saveRequirementWindow,
   signInAsAdmin,
   signOutAdmin,
+  syncEmployeeCustodianOnAssets,
   isAdminEmail,
   watchAuth,
   watchCollection,
+  watchRequirementWindow,
   type RequirementWindowRecord,
 } from "@/lib/firebase";
 import {
@@ -70,6 +74,7 @@ import {
   DEFAULT_DEPARTMENTS,
   DEFAULT_LOCATIONS,
   FURNITURE_IMAGE_OPTIONS,
+  effectiveAssetStatus,
   formatSpecLabel,
   furnitureImageForAsset,
   getAssetKeySpecChips,
@@ -77,6 +82,7 @@ import {
   isLocationOnlyAssetType,
   isMonitorAssetType,
   isPrinterAssetType,
+  matchesSearchQuery,
   tonerMatchesPrinter,
 } from "@/lib/catalog";
 import {
@@ -182,8 +188,25 @@ export default function Home() {
   const [documentEmployeeId, setDocumentEmployeeId] = useState("");
   const [documentAssetIds, setDocumentAssetIds] = useState<string[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [toast, setToast] = useState("");
   const toastTimerRef = useRef<number | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+      } else if (event.key === "Escape" && document.activeElement === searchInputRef.current) {
+        setSearch("");
+        searchInputRef.current?.blur();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   useEffect(() => {
     if (!firebaseReady) return;
@@ -203,6 +226,11 @@ export default function Home() {
         flash(`Firestore access restricted for "${colName}". Please verify firestore.rules are published.`);
       }
     };
+    const applyWindowConfig = (config: RequirementWindowRecord) => {
+      setRequirementWindow(config);
+      if (config.departments?.length) setDepartments(config.departments);
+      if (config.locations?.length) setLocations(config.locations);
+    };
     const cleanups = [
       watchCollection<Asset>("assets", setAssets, handleCollectionError("assets")),
       watchCollection<Employee>("employees", setEmployees, handleCollectionError("employees")),
@@ -210,12 +238,10 @@ export default function Home() {
       watchCollection<RequestRow>("requirements", setRequests, handleCollectionError("requirements")),
       watchCollection<TonerStock>("toners", setToners, handleCollectionError("toners")),
       watchCollection<TonerTransaction>("tonerTransactions", setTonerTransactions, handleCollectionError("tonerTransactions")),
+      watchRequirementWindow(applyWindowConfig),
     ];
     getRequirementWindow().then((config) => {
-      if (!config) return;
-      setRequirementWindow(config);
-      if (config.departments?.length) setDepartments(config.departments);
-      if (config.locations?.length) setLocations(config.locations);
+      if (config) applyWindowConfig(config);
     });
     return () => cleanups.forEach((cleanup) => cleanup());
   }, [adminState]);
@@ -229,11 +255,30 @@ export default function Home() {
     [assets],
   );
 
-  const filteredAssets = assets.filter((asset) => {
-    const needle = search.toLowerCase();
-    return (
-      (category === "All" || asset.category === category) &&
-      [
+  const sortedAssets = useMemo(
+    () => [...assets].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || "") || a.code.localeCompare(b.code)),
+    [assets],
+  );
+
+  const sortedMovements = useMemo(
+    () => [...movements].sort((a, b) => (b.createdAt || b.date || "").localeCompare(a.createdAt || a.date || "")),
+    [movements],
+  );
+
+  const sortedRequests = useMemo(
+    () => [...requests].sort((a, b) => {
+      if (a.status === "Pending" && b.status !== "Pending") return -1;
+      if (a.status !== "Pending" && b.status === "Pending") return 1;
+      return (a.neededDate || "").localeCompare(b.neededDate || "");
+    }),
+    [requests],
+  );
+
+  const filteredAssets = useMemo(() => {
+    return sortedAssets.filter((asset) => {
+      if (category !== "All" && asset.category !== category) return false;
+      const emp = asset.employeeId ? employeeMap[asset.employeeId] : undefined;
+      return matchesSearchQuery(search, [
         asset.code,
         asset.name,
         asset.serial,
@@ -241,34 +286,68 @@ export default function Home() {
         asset.brand,
         asset.model,
         asset.type,
+        asset.category,
+        effectiveAssetStatus(asset),
+        asset.condition,
         asset.assignedDepartment,
         asset.custodianName,
-        asset.specs?.processor,
-        asset.specs?.compatibleToner,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle)
-    );
-  });
+        asset.custodianDepartment,
+        emp?.name,
+        emp?.empNo,
+        emp?.department,
+        ...Object.values(asset.specs ?? {}),
+      ]);
+    });
+  }, [sortedAssets, category, search, employeeMap]);
 
-  const filteredEmployees = employees.filter((employee) => {
-    const needle = search.toLowerCase();
-    return (
-      (department === "All" || employee.department === department) &&
-      [employee.name, employee.empNo, employee.department, employee.designation]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle)
+  const filteredEmployees = useMemo(() => {
+    return employees
+      .filter((employee) =>
+        (department === "All" || employee.department === department) &&
+        matchesSearchQuery(search, [
+          employee.name,
+          employee.empNo,
+          employee.email,
+          employee.department,
+          employee.designation,
+          employee.status,
+        ]),
+      )
+      .sort((a, b) => a.department.localeCompare(b.department) || a.name.localeCompare(b.name));
+  }, [employees, department, search]);
+
+  const filteredMovements = useMemo(() => {
+    if (!search.trim()) return sortedMovements;
+    return sortedMovements.filter((m) => {
+      const asset = assetMap[m.assetId];
+      const emp = m.employeeId ? employeeMap[m.employeeId] : undefined;
+      return matchesSearchQuery(search, [
+        m.type,
+        m.note,
+        m.date,
+        m.employeeName,
+        m.department,
+        asset?.name,
+        asset?.code,
+        asset?.serial,
+        emp?.name,
+        emp?.department,
+      ]);
+    });
+  }, [sortedMovements, search, assetMap, employeeMap]);
+
+  const filteredRequests = useMemo(() => {
+    if (!search.trim()) return sortedRequests;
+    return sortedRequests.filter((r) =>
+      matchesSearchQuery(search, [r.department, r.item, r.reason, r.status, r.requesterName, r.requesterEmail]),
     );
-  });
+  }, [sortedRequests, search]);
 
   const printerAssets = useMemo(() => {
-    const needle = search.toLowerCase();
-    return assets.filter((asset) => {
+    return sortedAssets.filter((asset) => {
       if (!isPrinterAssetType(asset.type)) return false;
-      if (!needle) return true;
-      return [
+      const emp = asset.employeeId ? employeeMap[asset.employeeId] : undefined;
+      return matchesSearchQuery(search, [
         asset.code,
         asset.name,
         asset.brand,
@@ -277,22 +356,16 @@ export default function Home() {
         asset.location,
         asset.assignedDepartment,
         asset.custodianName,
-        asset.specs?.compatibleToner,
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle);
+        emp?.name,
+        emp?.department,
+        ...Object.values(asset.specs ?? {}),
+      ]);
     });
-  }, [assets, search]);
+  }, [sortedAssets, search, employeeMap]);
 
   const filteredToners = useMemo(() => {
-    const needle = search.toLowerCase();
-    if (!needle) return toners;
     return toners.filter((t) =>
-      [t.printerModel, t.printerBrand, t.tonerModel, t.color, t.storageLocation, t.notes]
-        .join(" ")
-        .toLowerCase()
-        .includes(needle),
+      matchesSearchQuery(search, [t.printerModel, t.printerBrand, t.tonerModel, t.color, t.storageLocation, t.notes]),
     );
   }, [toners, search]);
 
@@ -330,35 +403,42 @@ export default function Home() {
       note: string;
     },
   ) {
-    const nextQty = mode === "Restock" ? toner.quantity + payload.quantity : Math.max(0, toner.quantity - payload.quantity);
-    const updatedToner: TonerStock = { ...toner, quantity: nextQty, updatedAt: today() };
-    const transaction: TonerTransaction = {
-      id: crypto.randomUUID(),
-      tonerId: toner.id,
-      printerModel: toner.printerModel,
-      tonerModel: toner.tonerModel,
-      color: toner.color,
-      type: mode,
-      quantity: payload.quantity,
-      resultingStock: nextQty,
-      printerAssetId: payload.printerAssetId,
-      printerName: payload.printerName,
-      department: payload.department,
-      recipientName: payload.recipientName,
-      date: today(),
-      note: payload.note,
-    };
-    setToners((rows) => rows.map((row) => (row.id === updatedToner.id ? updatedToner : row)));
-    setTonerTransactions((rows) => [transaction, ...rows]);
-    await saveRecord("toners", updatedToner);
-    await saveRecord("tonerTransactions", transaction);
-    setTonerAction(null);
-    setModal(null);
-    flash(
-      mode === "Restock"
-        ? `Added +${payload.quantity} ${toner.tonerModel} (${nextQty} in stock)`
-        : `Issued ${payload.quantity} ${toner.tonerModel}${payload.department ? ` to ${payload.department}` : ""} (${nextQty} left)`,
-    );
+    try {
+      const nowIso = new Date().toISOString();
+      const { updatedToner, transaction } = await applyTonerStockTransaction(
+        { ...toner, updatedAt: today() },
+        mode,
+        payload.quantity,
+        (resultingStock): TonerTransaction => ({
+          id: crypto.randomUUID(),
+          tonerId: toner.id,
+          printerModel: toner.printerModel,
+          tonerModel: toner.tonerModel,
+          color: toner.color,
+          type: mode,
+          quantity: payload.quantity,
+          resultingStock,
+          printerAssetId: payload.printerAssetId,
+          printerName: payload.printerName,
+          department: payload.department,
+          recipientName: payload.recipientName,
+          date: today(),
+          createdAt: nowIso,
+          note: payload.note,
+        }),
+      );
+      setToners((rows) => rows.map((row) => (row.id === updatedToner.id ? updatedToner : row)));
+      setTonerTransactions((rows) => [transaction, ...rows]);
+      setTonerAction(null);
+      setModal(null);
+      flash(
+        mode === "Restock"
+          ? `Added +${payload.quantity} ${toner.tonerModel} (${updatedToner.quantity} in stock)`
+          : `Issued ${payload.quantity} ${toner.tonerModel}${payload.department ? ` to ${payload.department}` : ""} (${updatedToner.quantity} left)`,
+      );
+    } catch (err: unknown) {
+      flash(err instanceof Error ? err.message : "Could not update toner stock.");
+    }
   }
 
   async function updateAsset(asset: Asset) {
@@ -375,23 +455,23 @@ export default function Home() {
     flash(`${asset.name} deleted from inventory`);
   }
 
-  async function addMovement(movement: Movement) {
-    const employee = employeeMap[movement.employeeId];
-    const enriched = {
-      ...movement,
-      employeeName: employee?.name,
-      department: employee?.department,
-    };
-    setMovements((rows) => [enriched, ...rows]);
-    await saveRecord("movements", enriched);
-    await saveRecord(`assets/${movement.assetId}/history`, {
-      id: movement.id,
-      type: movement.type,
-      date: movement.date,
-      note: movement.note,
-      employeeName: employee?.name ?? "Asset Administration",
-      department: employee?.department ?? "Central Stock",
+  async function applyAssetMovementBatch(
+    entries: { asset: Asset; movement: Movement }[],
+  ) {
+    const enrichedEntries = entries.map(({ asset, movement }) => {
+      const employee = employeeMap[movement.employeeId];
+      const enrichedMovement: Movement = {
+        ...movement,
+        createdAt: movement.createdAt ?? new Date().toISOString(),
+        employeeName: movement.employeeName ?? employee?.name,
+        department: movement.department ?? employee?.department,
+      };
+      return { asset, movement: enrichedMovement };
     });
+    const updatedMap = new Map(enrichedEntries.map(({ asset }) => [asset.id, asset]));
+    setAssets((rows) => rows.map((row) => updatedMap.get(row.id) ?? row));
+    setMovements((rows) => [...enrichedEntries.map(({ movement }) => movement), ...rows]);
+    await commitAssetMovementsBatch(enrichedEntries);
   }
 
   async function purgeDepartmentData(targetDepartment: string) {
@@ -540,7 +620,12 @@ export default function Home() {
 
   const pendingRequirements = requests.filter((request) => request.status === "Pending").length;
   const lowStockToners = toners.filter((toner) => toner.quantity <= toner.minStock).length;
-  const healthyAssets = assets.filter((asset) => asset.status !== "In repair" && asset.status !== "Retired").length;
+  const repairAssetsCount = assets.filter((asset) => effectiveAssetStatus(asset) === "In repair").length;
+  const totalAlerts = pendingRequirements + lowStockToners + repairAssetsCount;
+  const healthyAssets = assets.filter((asset) => {
+    const st = effectiveAssetStatus(asset);
+    return st !== "In repair" && st !== "Retired";
+  }).length;
   const inventoryHealth = assets.length ? Math.round((healthyAssets / assets.length) * 100) : 100;
 
   if (firebaseReady && adminState !== "admin") {
@@ -575,7 +660,15 @@ export default function Home() {
             <button
               key={name}
               className={view === name ? "nav-item active" : "nav-item"}
-              onClick={() => { setView(name); setSearch(""); setSidebarOpen(false); }}
+              onClick={() => {
+                setView(name);
+                if (name === "Assets") {
+                  setCategory("All");
+                  setAssetTypeFilter("All");
+                }
+                setSearch("");
+                setSidebarOpen(false);
+              }}
             >
               <Icon size={19} />{name}
               {name === "Requirements" && pendingRequirements > 0 && <span className="nav-count">{pendingRequirements}</span>}
@@ -597,23 +690,93 @@ export default function Home() {
       <section className="workspace">
         <header className="topbar">
           <button className="icon-button menu-button" onClick={() => setSidebarOpen(true)} aria-label="Open navigation"><Menu size={21} /></button>
-          <div className="global-search"><Search size={19} /><input aria-label="Search assets and employees" placeholder="Search assets, people, locations or toners…" value={search} onChange={(event) => setSearch(event.target.value)} /><kbd>⌘ K</kbd></div>
+          <div className="global-search">
+            <Search size={19} />
+            <input
+              ref={searchInputRef}
+              aria-label="Search assets and employees"
+              placeholder="Search assets, people, locations or toners…"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            {search ? (
+              <button type="button" className="search-clear-btn" aria-label="Clear search" onClick={() => setSearch("")}><X size={14} /></button>
+            ) : (
+              <kbd>⌘ K</kbd>
+            )}
+          </div>
           <div className="top-actions">
             <span className={firebaseReady ? "sync-pill live" : "sync-pill"}><CircleDot size={13} />{firebaseReady ? "Firebase live" : "Demo workspace"}</span>
-            <button className="icon-button"><Bell size={19} /><i /></button>
-            <div className="profile"><span>AA</span><div><strong>Asset Administrator</strong><small>{signedInEmail || ADMIN_EMAIL}</small></div><ChevronDown size={16} /></div>
+            <button
+              className="icon-button"
+              aria-label={totalAlerts > 0 ? `${totalAlerts} active alerts` : "No active alerts"}
+              title={
+                totalAlerts > 0
+                  ? `${lowStockToners} low toners · ${pendingRequirements} pending requirements · ${repairAssetsCount} items in repair`
+                  : "All inventory levels and requests are up to date"
+              }
+              onClick={() => {
+                if (lowStockToners > 0) {
+                  setPrintersSubTab("Toner Stock");
+                  setView("Printers & Toners");
+                } else if (pendingRequirements > 0) {
+                  setView("Requirements");
+                } else if (repairAssetsCount > 0) {
+                  setCategory("All");
+                  setAssetTypeFilter("All");
+                  setSearch("In repair");
+                  setView("Assets");
+                } else {
+                  flash("All inventory levels, repairs and requirements are healthy");
+                }
+              }}
+            >
+              <Bell size={19} />
+              {totalAlerts > 0 && <i />}
+            </button>
+            <div className="profile-wrapper">
+              <button
+                type="button"
+                className="profile profile-trigger"
+                aria-expanded={profileMenuOpen}
+                onClick={() => setProfileMenuOpen((open) => !open)}
+              >
+                <span>AA</span>
+                <div><strong>Asset Administrator</strong><small>{signedInEmail || ADMIN_EMAIL}</small></div>
+                <ChevronDown size={16} />
+              </button>
+              {profileMenuOpen && (
+                <div className="profile-menu">
+                  <div className="profile-menu-head">
+                    <strong>{signedInEmail || ADMIN_EMAIL}</strong>
+                    <small>{firebaseReady ? "Signed in via Firebase Auth" : "Local workspace mode"}</small>
+                  </div>
+                  {firebaseReady && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setProfileMenuOpen(false);
+                        void signOutAdmin();
+                      }}
+                    >
+                      <LogOut size={14} />Sign out
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
         <div className="content">
           {view === "Dashboard" && (
             <Dashboard
-              assets={assets}
+              assets={sortedAssets}
               employees={employees}
               departments={departments}
               locations={locations}
-              requests={requests}
-              movements={movements}
+              requests={sortedRequests}
+              movements={sortedMovements}
               toners={toners}
               employeeMap={employeeMap}
               assetMap={assetMap}
@@ -693,10 +856,10 @@ export default function Home() {
             />
           )}
           {view === "Movements" && (
-            <MovementsView movements={movements} assetMap={assetMap} employeeMap={employeeMap} onAssign={() => setModal("assign")} onReturn={() => setModal("return")} onRepair={() => setModal("repair")} />
+            <MovementsView movements={filteredMovements} assetMap={assetMap} employeeMap={employeeMap} onAssign={() => setModal("assign")} onReturn={() => setModal("return")} onRepair={() => setModal("repair")} />
           )}
           {view === "Requirements" && (
-            <RequirementsView requests={requests} setRequests={setRequests} windowConfig={requirementWindow} setWindowConfig={setRequirementWindow} onSchedule={() => setModal("schedule")} onAdd={() => setModal("request")} onExport={exportWorkbook} />
+            <RequirementsView requests={filteredRequests} setRequests={setRequests} windowConfig={requirementWindow} setWindowConfig={setRequirementWindow} onSchedule={() => setModal("schedule")} onAdd={() => setModal("request")} onExport={exportWorkbook} onFlash={flash} />
           )}
           {view === "Reports" && (
             <ReportsView
@@ -730,7 +893,7 @@ export default function Home() {
         <AssetDrawer
           asset={selectedAsset}
           employee={selectedAsset.employeeId ? employeeMap[selectedAsset.employeeId] : undefined}
-          movements={movements.filter((row) => row.assetId === selectedAsset.id)}
+          movements={sortedMovements.filter((row) => row.assetId === selectedAsset.id)}
           employeeMap={employeeMap}
           toners={toners}
           onClose={() => setSelectedAsset(null)}
@@ -777,7 +940,30 @@ export default function Home() {
             />
           )}
           {modal === "employee" && <EmployeeForm departments={departments} onSave={async (employee) => { setEmployees((rows) => [employee, ...rows]); await saveRecord("employees", employee); setModal(null); flash("Employee added"); }} />}
-          {modal === "employeeEdit" && editingEmployee && <EmployeeForm departments={departments} initial={editingEmployee} onSave={async (employee) => { setEmployees((rows) => rows.map((row) => row.id === employee.id ? employee : row)); await saveRecord("employees", employee); setEditingEmployee(null); setModal(null); flash("Employee details updated"); }} />}
+          {modal === "employeeEdit" && editingEmployee && (
+            <EmployeeForm
+              departments={departments}
+              initial={editingEmployee}
+              onSave={async (employee) => {
+                setEmployees((rows) => rows.map((row) => row.id === employee.id ? employee : row));
+                await saveRecord("employees", employee);
+                const assignedToEmp = assets.filter((a) => a.employeeId === employee.id);
+                if (assignedToEmp.length && (employee.name !== editingEmployee.name || employee.department !== editingEmployee.department)) {
+                  setAssets((rows) =>
+                    rows.map((row) =>
+                      row.employeeId === employee.id
+                        ? { ...row, custodianName: employee.name, custodianDepartment: employee.department }
+                        : row,
+                    ),
+                  );
+                  await syncEmployeeCustodianOnAssets(employee, assignedToEmp);
+                }
+                setEditingEmployee(null);
+                setModal(null);
+                flash("Employee details updated");
+              }}
+            />
+          )}
           {modal === "departments" && <DepartmentManager departments={departments} employees={employees} onSave={async (items) => { const nextWindow = { ...requirementWindow, departments: items }; setDepartments(items); setRequirementWindow(nextWindow); await saveRequirementWindow(nextWindow); setModal(null); flash("Department list updated"); }} onPurge={async (department) => { const deleted = await purgeDepartmentData(department); setModal(null); flash(`${department} removed · ${deleted.assets} assets, ${deleted.employees} employees, ${deleted.movements} movements and ${deleted.requirements} requirements deleted`); }} />}
           {modal === "locations" && <LocationManager locations={locations} assets={assets} onSave={async (items) => { const nextWindow = { ...requirementWindow, locations: items }; setLocations(items); setRequirementWindow(nextWindow); await saveRequirementWindow(nextWindow); setModal(null); flash("Classroom / location list updated"); }} />}
           {modal === "toner" && <TonerForm printers={assets.filter((a) => isPrinterAssetType(a.type))} initial={editingToner ?? undefined} preset={presetTonerModel} onSave={saveToner} />}
@@ -794,25 +980,36 @@ export default function Home() {
           )}
           {modal === "assign" && <AssignForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, email, shouldSendEmail, note) => {
             const employee = employeeMap[employeeId];
-            const assignedAssets: Asset[] = [];
             const movementNote = note || "Asset issued through AssetFlow";
-            for (const assetId of assetIds) {
-              const asset = assets.find((row) => row.id === assetId)!;
-              const updatedAsset: Asset = {
-                ...asset,
-                status: "Assigned",
-                employeeId,
-                allocationType: "person",
-                assignedDepartment: undefined,
-                location: asset.category === "Non-IT Asset" ? employee?.department : asset.location,
-                custodianName: employee?.name,
-                custodianDepartment: employee?.department,
-                updatedAt: today(),
-              };
-              assignedAssets.push(updatedAsset);
-              await updateAsset(updatedAsset);
-              await addMovement({ id: crypto.randomUUID(), assetId, employeeId, type: "Assigned", date: today(), note: movementNote });
-            }
+            const nowIso = new Date().toISOString();
+            const batchEntries = assetIds
+              .map((assetId) => assets.find((row) => row.id === assetId))
+              .filter((row): row is Asset => Boolean(row))
+              .map((asset) => {
+                const updatedAsset: Asset = {
+                  ...asset,
+                  status: "Assigned",
+                  employeeId,
+                  allocationType: "person",
+                  assignedDepartment: undefined,
+                  location: asset.category === "Non-IT Asset" ? employee?.department : asset.location,
+                  custodianName: employee?.name,
+                  custodianDepartment: employee?.department,
+                  updatedAt: today(),
+                };
+                const movement: Movement = {
+                  id: crypto.randomUUID(),
+                  assetId: asset.id,
+                  employeeId,
+                  type: "Assigned",
+                  date: today(),
+                  createdAt: nowIso,
+                  note: movementNote,
+                };
+                return { asset: updatedAsset, movement };
+              });
+            const assignedAssets = batchEntries.map((entry) => entry.asset);
+            await applyAssetMovementBatch(batchEntries);
 
             if (shouldSendEmail && email) {
               try {
@@ -863,34 +1060,37 @@ export default function Home() {
           }} />}
           {modal === "return" && <ReturnForm assets={assets} employees={employees} onSave={async (assetIds, employeeId, email, shouldSendEmail, clearance, note) => {
             const employee = employeeMap[employeeId];
-            const returnedAssets: Asset[] = [];
             const returnNote = note || (clearance ? "Returned during employee clearance" : "Returned to central stock");
-
-            for (const assetId of assetIds) {
-              const asset = assets.find((row) => row.id === assetId)!;
-              const updatedAsset: Asset = {
-                ...asset,
-                status: "Available",
-                employeeId: undefined,
-                allocationType: undefined,
-                assignedDepartment: undefined,
-                location: asset.category === "Non-IT Asset" ? "Central Stock" : asset.location,
-                custodianName: undefined,
-                custodianDepartment: undefined,
-                condition: "Good",
-                updatedAt: today(),
-              };
-              returnedAssets.push(updatedAsset);
-              await updateAsset(updatedAsset);
-              await addMovement({
-                id: crypto.randomUUID(),
-                assetId,
-                employeeId,
-                type: clearance ? "Cleared" : "Returned",
-                date: today(),
-                note: returnNote,
+            const nowIso = new Date().toISOString();
+            const batchEntries = assetIds
+              .map((assetId) => assets.find((row) => row.id === assetId))
+              .filter((row): row is Asset => Boolean(row))
+              .map((asset) => {
+                const updatedAsset: Asset = {
+                  ...asset,
+                  status: "Available",
+                  employeeId: undefined,
+                  allocationType: undefined,
+                  assignedDepartment: undefined,
+                  location: asset.category === "Non-IT Asset" ? "Central Stock" : asset.location,
+                  custodianName: undefined,
+                  custodianDepartment: undefined,
+                  condition: "Good",
+                  updatedAt: today(),
+                };
+                const movement: Movement = {
+                  id: crypto.randomUUID(),
+                  assetId: asset.id,
+                  employeeId,
+                  type: clearance ? "Cleared" : "Returned",
+                  date: today(),
+                  createdAt: nowIso,
+                  note: returnNote,
+                };
+                return { asset: updatedAsset, movement };
               });
-            }
+            const returnedAssets = batchEntries.map((entry) => entry.asset);
+            await applyAssetMovementBatch(batchEntries);
 
             if (shouldSendEmail && email) {
               try {
@@ -940,10 +1140,33 @@ export default function Home() {
 
             openDocument(clearance ? "Employee Clearance" : "Asset Return", employeeId, assetIds);
           }} />}
-          {modal === "repair" && <RepairForm assets={assets} onSave={async (assetId, action, note) => { const asset = assets.find((row) => row.id === assetId); if (!asset) return; const isAllocated = Boolean(asset.employeeId || asset.allocationType === "department" || asset.allocationType === "location"); const nextStatus: AssetStatus = action === "start" ? "In repair" : isAllocated ? "Assigned" : "Available"; await updateAsset({ ...asset, status: nextStatus, condition: action === "start" ? "Repair" : "Good", updatedAt: today() }); await addMovement({ id: crypto.randomUUID(), assetId, employeeId: asset.employeeId || "", type: "Repair", date: today(), note: `${action === "start" ? "Sent for repair" : "Repair completed"}: ${note}` }); setModal(null); flash(action === "start" ? "Repair record started" : "Repair completion recorded"); }} />}
+          {modal === "repair" && (
+            <RepairForm
+              assets={assets}
+              onSave={async (assetId, action, note) => {
+                const asset = assets.find((row) => row.id === assetId);
+                if (!asset) return;
+                const isAllocated = Boolean(asset.employeeId || asset.allocationType === "department" || asset.allocationType === "location");
+                const nextStatus: AssetStatus = action === "start" ? "In repair" : isAllocated ? "Assigned" : "Available";
+                const updatedAsset: Asset = { ...asset, status: nextStatus, condition: action === "start" ? "Repair" : "Good", updatedAt: today() };
+                const movement: Movement = {
+                  id: crypto.randomUUID(),
+                  assetId,
+                  employeeId: asset.employeeId || "",
+                  type: "Repair",
+                  date: today(),
+                  createdAt: new Date().toISOString(),
+                  note: `${action === "start" ? "Sent for repair" : "Repair completed"}: ${note}`,
+                };
+                await applyAssetMovementBatch([{ asset: updatedAsset, movement }]);
+                setModal(null);
+                flash(action === "start" ? "Repair record started" : "Repair completion recorded");
+              }}
+            />
+          )}
           {modal === "request" && <RequestForm departments={departments} onSave={async (request) => { setRequests((rows) => [request, ...rows]); await saveRecord("requirements", request); setModal(null); flash("Requirement submitted"); }} />}
-          {modal === "document" && <PrintableDocument type={documentType} employees={employees} assets={assets} initialEmployeeId={documentEmployeeId} initialAssetIds={documentAssetIds} />}
-          {modal === "qrBatch" && <QrBatch assets={assets} employees={employees} departments={departments} employeeMap={employeeMap} />}
+          {modal === "document" && <PrintableDocument type={documentType} employees={employees} assets={assets} movements={sortedMovements} assetMap={assetMap} initialEmployeeId={documentEmployeeId} initialAssetIds={documentAssetIds} />}
+          {modal === "qrBatch" && <QrBatch assets={assets} employees={employees} departments={departments} locations={locations} employeeMap={employeeMap} />}
           {modal === "schedule" && <ScheduleForm value={requirementWindow} onSave={async (next) => { setRequirementWindow(next); await saveRequirementWindow(next); setModal(null); flash(next.isOpen ? "Requirement form opened" : "Requirement form closed"); }} />}
         </Modal>
       )}
@@ -991,9 +1214,9 @@ function Dashboard({
   onRequest: () => void;
   onAsset: (asset: Asset) => void;
 }) {
-  const assigned = assets.filter((asset) => asset.status === "Assigned").length;
-  const available = assets.filter((asset) => asset.status === "Available").length;
-  const repairCount = assets.filter((asset) => asset.status === "In repair" || asset.condition === "Repair").length;
+  const assigned = assets.filter((asset) => effectiveAssetStatus(asset) === "Assigned").length;
+  const available = assets.filter((asset) => effectiveAssetStatus(asset) === "Available").length;
+  const repairCount = assets.filter((asset) => effectiveAssetStatus(asset) === "In repair").length;
   const lowToners = toners.filter((toner) => toner.quantity <= toner.minStock);
   const totalTonerUnits = toners.reduce((sum, item) => sum + item.quantity, 0);
 
@@ -1229,11 +1452,11 @@ function DepartmentAvailability({ assets, employees, departments, locations, onV
     return currentDepartment === selectedDepartment || asset.location === selectedDepartment;
   });
   const activeEmployees = employees.filter((employee) => employee.status === "Active" && (selectedDepartment === "All departments" || employee.department === selectedDepartment));
-  const availableAssets = departmentAssets.filter((asset) => asset.status === "Available");
-  const assignedAssets = departmentAssets.filter((asset) => asset.status === "Assigned");
+  const availableAssets = departmentAssets.filter((asset) => effectiveAssetStatus(asset) === "Available");
+  const assignedAssets = departmentAssets.filter((asset) => effectiveAssetStatus(asset) === "Assigned");
   const typeSummary = Object.entries(departmentAssets.reduce<Record<string, { total: number; available: number }>>((summary, asset) => {
     const current = summary[asset.type] ?? { total: 0, available: 0 };
-    summary[asset.type] = { total: current.total + 1, available: current.available + (asset.status === "Available" ? 1 : 0) };
+    summary[asset.type] = { total: current.total + 1, available: current.available + (effectiveAssetStatus(asset) === "Available" ? 1 : 0) };
     return summary;
   }, {})).sort(([, left], [, right]) => right.total - left.total);
   const selectedAvailableAssets = availableAssets.filter((asset) => asset.type === selectedType);
@@ -1481,10 +1704,15 @@ function MovementsView({ movements, assetMap, employeeMap, onAssign, onReturn, o
   );
 }
 
-function RequirementsView({ requests, setRequests, windowConfig, setWindowConfig, onSchedule, onAdd, onExport }: { requests: RequestRow[]; setRequests: React.Dispatch<React.SetStateAction<RequestRow[]>>; windowConfig: RequirementWindowRecord; setWindowConfig: (value: RequirementWindowRecord) => void; onSchedule: () => void; onAdd: () => void; onExport: () => void }) {
+function RequirementsView({ requests, setRequests, windowConfig, setWindowConfig, onSchedule, onAdd, onExport, onFlash }: { requests: RequestRow[]; setRequests: React.Dispatch<React.SetStateAction<RequestRow[]>>; windowConfig: RequirementWindowRecord; setWindowConfig: (value: RequirementWindowRecord) => void; onSchedule: () => void; onAdd: () => void; onExport: () => void; onFlash: (msg: string) => void }) {
   const formUrl = typeof window === "undefined" ? "" : `${window.location.origin}/requirements/${windowConfig.slug}`;
   async function copyFormLink() {
-    await navigator.clipboard.writeText(formUrl);
+    try {
+      await navigator.clipboard.writeText(formUrl);
+      onFlash("Requirement form link copied to clipboard");
+    } catch {
+      onFlash(`Shareable URL: ${formUrl}`);
+    }
   }
   return (
     <>
@@ -1772,8 +2000,8 @@ function AssetTable({ assets, employeeMap, onAsset, compact = false }: { assets:
                   )}
                 </td>
                 <td>
-                  <span className={statusClass(asset.condition === "Repair" && asset.status !== "Retired" ? "In repair" : asset.status)}>
-                    {asset.condition === "Repair" && asset.status !== "Retired" ? "In repair" : asset.status}
+                  <span className={statusClass(effectiveAssetStatus(asset))}>
+                    {effectiveAssetStatus(asset)}
                   </span>
                 </td>
                 <td><button className="row-action" aria-label={`View ${asset.name}`}>→</button></td>
@@ -1843,8 +2071,8 @@ function AssetDrawer({
           <div className={furniture ? "asset-hero furniture-hero" : "asset-hero"}>
             {furniture ? <img src={furniture.src} alt={`${furniture.label} ${furniture.model}`} /> : <span className="asset-big-icon">{assetTypeIcon(asset.type, 34)}</span>}
             <div>
-              <span className={statusClass(asset.condition === "Repair" && asset.status !== "Retired" ? "In repair" : asset.status)}>
-                {asset.condition === "Repair" && asset.status !== "Retired" ? "In repair" : asset.status}
+              <span className={statusClass(effectiveAssetStatus(asset))}>
+                {effectiveAssetStatus(asset)}
               </span>
               <p>{asset.brand} · {asset.model}</p>
             </div>
@@ -2110,10 +2338,12 @@ function AssetForm({
           form.type === "Printer" ? "PRN" :
           form.type.slice(0, 3).toUpperCase();
 
+        const uniqueSuffix = `${String(Date.now()).slice(-4)}${Math.floor(10 + Math.random() * 90)}`;
+
         onSave({
           ...initial,
           id: initial?.id ?? crypto.randomUUID(),
-          code: initial?.code ?? `${prefix}-${typeCodePrefix}-${String(Date.now()).slice(-4)}`,
+          code: initial?.code ?? `${prefix}-${typeCodePrefix}-${uniqueSuffix}`,
           category: form.category as Asset["category"],
           type: form.type,
           name: form.name,
@@ -2169,13 +2399,14 @@ function AssetForm({
           onChange={(event) => {
             const nextType = event.target.value;
             const furniture = FURNITURE_IMAGE_OPTIONS.find((option) => option.type === nextType);
+            const wasFurniture = FURNITURE_IMAGE_OPTIONS.some((option) => option.type === form.type);
             const preserveMonitorSpecs = isMonitorAssetType(form.type) && isMonitorAssetType(nextType);
             setForm({
               ...form,
               type: nextType,
               imageKey: furniture?.key ?? "",
               model: furniture?.model ?? (preserveMonitorSpecs ? form.model : ""),
-              name: furniture ? `${furniture.label} - ${furniture.model}` : form.name,
+              name: furniture ? `${furniture.label} - ${furniture.model}` : (wasFurniture ? "" : form.name),
             });
             if (!preserveMonitorSpecs) setSpecs({});
           }}
@@ -2462,8 +2693,8 @@ function AssignForm({
   const [selected, setSelected] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
-  const available = assets.filter((asset) => asset.status === "Available" && !isLocationOnlyAssetType(asset.type));
-  const locationOnlyInStock = assets.filter((asset) => asset.status === "Available" && isLocationOnlyAssetType(asset.type)).length;
+  const available = assets.filter((asset) => effectiveAssetStatus(asset) === "Available" && !isLocationOnlyAssetType(asset.type));
+  const locationOnlyInStock = assets.filter((asset) => effectiveAssetStatus(asset) === "Available" && isLocationOnlyAssetType(asset.type)).length;
 
   return (
     <form
@@ -2765,33 +2996,123 @@ function DepartmentManager({ departments, employees, onSave, onPurge }: { depart
 }
 
 function RequestForm({ departments, onSave }: { departments: string[]; onSave: (request: RequestRow) => void }) {
-  const [form, setForm] = useState({ department: departments[0] ?? "", item: "", quantity: "1", neededDate: "2026-09-01", reason: "" });
+  const [form, setForm] = useState(() => ({
+    department: departments[0] ?? "",
+    item: "",
+    quantity: "1",
+    neededDate: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10),
+    reason: "",
+  }));
   const field = (key: keyof typeof form) => ({ value: form[key], onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setForm({ ...form, [key]: event.target.value }) });
   return <form className="form-grid" onSubmit={(event) => { event.preventDefault(); onSave({ id: crypto.randomUUID(), department: form.department, item: form.item, quantity: Number(form.quantity), neededDate: form.neededDate, reason: form.reason, status: "Pending" }); }}><label className="full">Department<select {...field("department")}>{departments.map((item) => <option key={item}>{item}</option>)}</select></label><label className="full">Required item<input required placeholder="e.g. 24” monitor or Office licence key" {...field("item")} /></label><label>Quantity<input required min="1" type="number" {...field("quantity")} /></label><label>Needed date<input required type="date" {...field("neededDate")} /></label><label className="full">Business reason<textarea required placeholder="Explain the upcoming need, new employee, replacement or project…" {...field("reason")} /></label><FormActions text="Submit requirement" /></form>;
 }
 
-function PrintableDocument({ type, employees, assets, initialEmployeeId = "", initialAssetIds = [] }: { type: string; employees: Employee[]; assets: Asset[]; initialEmployeeId?: string; initialAssetIds?: string[] }) {
-  const [employeeId, setEmployeeId] = useState(initialEmployeeId || employees[0]?.id || "");
+function PrintableDocument({
+  type,
+  employees,
+  assets,
+  movements = [],
+  assetMap = {},
+  initialEmployeeId = "",
+  initialAssetIds = [],
+}: {
+  type: string;
+  employees: Employee[];
+  assets: Asset[];
+  movements?: Movement[];
+  assetMap?: Record<string, Asset>;
+  initialEmployeeId?: string;
+  initialAssetIds?: string[];
+}) {
+  const isMovementHistory = type === "Movement History";
+  const [employeeId, setEmployeeId] = useState(isMovementHistory ? "ALL" : (initialEmployeeId || employees[0]?.id || ""));
   const employee = employees.find((row) => row.id === employeeId);
   const contextualAssets = initialAssetIds.length ? assets.filter((asset) => initialAssetIds.includes(asset.id)) : assets.filter((asset) => asset.employeeId === employeeId);
   const [selected, setSelected] = useState<string[]>(() => initialAssetIds.length ? initialAssetIds : assets.filter((asset) => asset.employeeId === (initialEmployeeId || employees[0]?.id)).map((asset) => asset.id));
   const owned = initialAssetIds.length ? contextualAssets : assets.filter((asset) => asset.employeeId === employeeId);
   const included = owned.filter((asset) => selected.includes(asset.id));
   const returnDocument = type.includes("Return") || type.includes("Clearance");
+
+  if (isMovementHistory) {
+    const visibleMovements = employeeId === "ALL"
+      ? movements
+      : movements.filter((m) => m.employeeId === employeeId);
+    return (
+      <div>
+        <div className="document-controls">
+          <label>
+            Filter by employee
+            <select value={employeeId} onChange={(event) => setEmployeeId(event.target.value)}>
+              <option value="ALL">All employees &amp; movements ({movements.length})</option>
+              {employees.map((row) => <option key={row.id} value={row.id}>{row.name} · {row.department}</option>)}
+            </select>
+          </label>
+          <button className="button button-primary" disabled={!visibleMovements.length} onClick={() => window.print()}>
+            <Printer size={17} />Print / Save PDF
+          </button>
+        </div>
+        <article className="print-document">
+          <div className="document-accent" />
+          <header>
+            <div><strong>ASSETFLOW</strong><span>Company Asset Management · Audit Trail</span></div>
+            <p>Movement History</p>
+          </header>
+          <div className="document-title">
+            <span>ASSET MOVEMENT HISTORY</span>
+            <h1>{employee ? employee.name : "Company-Wide Asset Audit Trail"}</h1>
+            <p>{employee ? `${employee.empNo} · ${employee.designation} · ${employee.department}` : "Complete assignment, return, clearance and repair log"}</p>
+          </div>
+          <div className="document-meta">
+            <span>Generated date<strong>{new Date().toLocaleDateString("en-GB")}</strong></span>
+            <span>Reference<strong>AF-AUDIT-{today()}</strong></span>
+            <span>Records included<strong>{visibleMovements.length}</strong></span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Date</th>
+                <th>Action</th>
+                <th>Asset / code</th>
+                <th>Employee / department</th>
+                <th>Remarks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleMovements.map((movement, index) => (
+                <tr key={movement.id}>
+                  <td>{String(index + 1).padStart(2, "0")}</td>
+                  <td>{new Date(movement.date).toLocaleDateString("en-GB")}</td>
+                  <td><span className={movement.type === "Repair" ? "document-condition condition-repair" : "document-condition"}>{movement.type}</span></td>
+                  <td><strong>{assetMap[movement.assetId]?.name || "Removed asset"}</strong><small>{assetMap[movement.assetId]?.code || movement.assetId}</small></td>
+                  <td><strong>{movement.employeeName || "Asset Administration"}</strong><small>{movement.department || "Central Stock"}</small></td>
+                  <td>{movement.note || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <footer><strong>AssetFlow verified audit report</strong><span>Generated from the live company asset register · {new Date().toLocaleString("en-GB")}</span></footer>
+        </article>
+      </div>
+    );
+  }
+
   return <div><div className="document-controls"><label>Employee<select value={employeeId} disabled={Boolean(initialEmployeeId)} onChange={(event) => { const nextId = event.target.value; setEmployeeId(nextId); setSelected(assets.filter((asset) => asset.employeeId === nextId).map((asset) => asset.id)); }}>{employees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><button className="button button-primary" disabled={!employee || !included.length} onClick={() => window.print()}><Printer size={17} />Print / Save PDF</button></div><div className="document-item-picker"><div><strong>Select items for this document</strong><span>{selected.length} of {owned.length} included</span></div><div>{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} />{asset.name}<small>{asset.code}</small></label>)}</div></div><article className="print-document"><div className="document-accent" /><header><div><strong>ASSETFLOW</strong><span>Company Asset Management · Official Record</span></div><p>{type}</p></header><div className="document-title"><span>{type.toUpperCase()}</span><h1>{employee?.name || "Select an employee"}</h1><p>{employee ? `${employee.empNo} · ${employee.designation} · ${employee.department}` : "No employee selected"}</p></div><div className="document-meta"><span>Document date<strong>{new Date().toLocaleDateString("en-GB")}</strong></span><span>Reference<strong>AF-{employee?.empNo || "UNASSIGNED"}-{type.replaceAll(" ", "-").toUpperCase()}</strong></span><span>Items covered<strong>{included.length}</strong></span></div><table><thead><tr><th>#</th><th>Asset / item</th><th>Asset code</th><th>Serial / location</th><th>Condition</th></tr></thead><tbody>{included.map((asset, index) => { const chips = getAssetKeySpecChips(asset); return <tr key={asset.id}><td>{String(index + 1).padStart(2, "0")}</td><td><strong>{asset.name}</strong><small>{[chips.join(" · "), asset.details].filter(Boolean).join(" — ")}</small></td><td>{asset.code}</td><td>{asset.serial || asset.location || "—"}</td><td><span className={asset.condition.toLowerCase() === "repair" ? "document-condition condition-repair" : "document-condition"}>{asset.condition}</span></td></tr>; })}</tbody></table><p className="document-statement">{returnDocument ? "The assets listed above have been returned to the company and verified by the responsible department. Any exception or damage must be recorded before final employee clearance is approved." : "I acknowledge receipt and responsibility for the company assets listed above. I agree to use them only for authorised company work, take reasonable care of them, and return them in good condition when requested."}</p><div className="signature-grid"><span>Employee signature<small>Name, signature & date</small></span><span>Issued / received by<small>Asset Administration</small></span><span>Authorised by<small>Department Head</small></span></div><footer><strong>AssetFlow verified document</strong><span>Generated from the live company asset register · {new Date().toLocaleString("en-GB")}</span></footer></article></div>;
 }
 
-function QrBatch({ assets, employees, departments, employeeMap }: { assets: Asset[]; employees: Employee[]; departments: string[]; employeeMap: Record<string, Employee> }) {
+function QrBatch({ assets, employees, departments, locations, employeeMap }: { assets: Asset[]; employees: Employee[]; departments: string[]; locations: string[]; employeeMap: Record<string, Employee> }) {
   const [category, setCategory] = useState("All");
-  const [scope, setScope] = useState<"all" | "department" | "employee">("all");
+  const [scope, setScope] = useState<"all" | "department" | "employee" | "location">("all");
   const [department, setDepartment] = useState(departments[0] ?? "");
-  const [employeeId, setEmployeeId] = useState(employees[0]?.id ?? "");
-  const [labelSize, setLabelSize] = useState<"compact" | "small" | "extraSmall">("compact");
+  const [locationFilter, setLocationFilter] = useState(locations[0] ?? "");
   const departmentEmployees = employees.filter((employee) => employee.department === department);
+  const [employeeId, setEmployeeId] = useState(() => employees.find((e) => e.department === (departments[0] ?? ""))?.id ?? "");
+  const [labelSize, setLabelSize] = useState<"compact" | "small" | "extraSmall">("compact");
   const labelsPerPage = labelSize === "compact" ? 24 : labelSize === "small" ? 35 : 54;
   const filtered = assets.filter((asset) => {
     if (category !== "All" && asset.category !== category) return false;
     if (scope === "employee") return asset.employeeId === employeeId;
+    if (scope === "location") return asset.location === locationFilter;
     if (scope === "department") {
       const assetDepartment = asset.employeeId ? employeeMap[asset.employeeId]?.department : asset.assignedDepartment || asset.custodianDepartment || asset.location;
       return assetDepartment === department;
@@ -2803,9 +3124,10 @@ function QrBatch({ assets, employees, departments, employeeMap }: { assets: Asse
   return <div className="qr-batch">
     <div className="qr-batch-toolbar qr-batch-filters">
       <label>Asset group<select value={category} onChange={(event) => setCategory(event.target.value)}><option>All</option><option>IT Asset</option><option>Non-IT Asset</option></select></label>
-      <label>Print labels for<select aria-label="QR label scope" value={scope} onChange={(event) => setScope(event.target.value as "all" | "department" | "employee")}><option value="all">All assets</option><option value="department">One department</option><option value="employee">One employee</option></select></label>
-      {scope !== "all" && <label>Department<select aria-label="QR label department" value={department} onChange={(event) => { const nextDepartment = event.target.value; setDepartment(nextDepartment); setEmployeeId(employees.find((employee) => employee.department === nextDepartment)?.id ?? ""); }}>{departments.map((item) => <option key={item}>{item}</option>)}</select></label>}
+      <label>Print labels for<select aria-label="QR label scope" value={scope} onChange={(event) => { const nextScope = event.target.value as "all" | "department" | "employee" | "location"; setScope(nextScope); if (nextScope === "employee" && !departmentEmployees.some((e) => e.id === employeeId)) { setEmployeeId(departmentEmployees[0]?.id ?? ""); } }}><option value="all">All assets</option><option value="department">One department</option><option value="employee">One employee</option><option value="location">One classroom / location</option></select></label>
+      {(scope === "department" || scope === "employee") && <label>Department<select aria-label="QR label department" value={department} onChange={(event) => { const nextDepartment = event.target.value; setDepartment(nextDepartment); setEmployeeId(employees.find((employee) => employee.department === nextDepartment)?.id ?? ""); }}>{departments.map((item) => <option key={item}>{item}</option>)}</select></label>}
       {scope === "employee" && <label>Employee<select aria-label="QR label employee" value={employeeId} onChange={(event) => setEmployeeId(event.target.value)} disabled={!departmentEmployees.length}>{departmentEmployees.length ? departmentEmployees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} · {employee.designation}</option>) : <option>No employees in this department</option>}</select></label>}
+      {scope === "location" && <label>Classroom / Location<select aria-label="QR label location" value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)}>{groupLocationsByBuilding(locations).map(([building, rooms]) => <optgroup key={building} label={building}>{rooms.map((room) => <option key={room.value} value={room.value}>{room.label}</option>)}</optgroup>)}</select></label>}
       <label>Label size<select aria-label="QR label size" value={labelSize} onChange={(event) => setLabelSize(event.target.value as "compact" | "small" | "extraSmall")}><option value="compact">Compact — 24 per A4</option><option value="small">Small — 35 per A4</option><option value="extraSmall">Extra small — 54 per A4</option></select></label>
       <div><button className="button button-secondary" onClick={() => setSelected((rows) => filtered.every((asset) => rows.includes(asset.id)) ? rows.filter((id) => !filtered.some((asset) => asset.id === id)) : Array.from(new Set([...rows, ...filtered.map((asset) => asset.id)])))}><Check size={16} />Select / clear group</button><button className="button button-primary" disabled={!visible.length} onClick={() => window.print()}><Printer size={17} />Print {visible.length} labels</button></div>
     </div>

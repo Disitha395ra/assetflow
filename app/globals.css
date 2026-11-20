@@ -1258,6 +1258,77 @@ select.status { appearance: none; cursor: pointer; padding-right: 8px; }
   .dashboard-assets-overview-head { flex-direction: column; align-items: flex-start; }
 }
 
+.search-clear-btn {
+  border: 0;
+  background: #eceef3;
+  color: #5b6270;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.search-clear-btn:hover {
+  background: #dfe2ea;
+  color: #1f2532;
+}
+.profile-wrapper {
+  position: relative;
+}
+.profile-trigger {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+}
+.profile-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 210px;
+  background: white;
+  border: 1px solid #e2e4ec;
+  border-radius: 11px;
+  box-shadow: 0 16px 40px rgba(20, 17, 36, .14);
+  padding: 10px;
+  z-index: 60;
+}
+.profile-menu-head {
+  padding: 6px 8px 9px;
+  border-bottom: 1px solid #eff0f4;
+  margin-bottom: 6px;
+}
+.profile-menu-head strong,
+.profile-menu-head small {
+  display: block;
+}
+.profile-menu-head strong {
+  font-size: 10px;
+  color: #1f2633;
+}
+.profile-menu-head small {
+  font-size: 8px;
+  color: #7c8391;
+  margin-top: 2px;
+}
+.profile-menu button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #ae3535;
+  padding: 8px;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.profile-menu button:hover {
+  background: #fff0f0;
+}
+
 @media (max-width: 720px) {
   .allocation-mode-grid,
   .allocation-mode-grid.three-col {
