@@ -1087,7 +1087,7 @@ export function LocationManager({
       </div>
 
       <p className="department-note">
-        Classrooms and locations are used for Classroom / Location Monitors, Google Chromecasts, and printer placement.
+        Classrooms and locations are used for Classroom / Location Monitors, Google Chromecasts, Projectors, and printer placement.
       </p>
 
       <div className="form-actions full">

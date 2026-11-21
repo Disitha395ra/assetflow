@@ -35,6 +35,7 @@ import {
   Pencil,
   Plus,
   Printer,
+  Projector,
   QrCode,
   RotateCcw,
   Search,
@@ -155,6 +156,7 @@ function specLabel(key: string) {
 function assetTypeIcon(type: string, size = 18) {
   if (type === "Laptop") return <Laptop size={size} />;
   if (type === "Printer") return <Printer size={size} />;
+  if (type === "Projector") return <Projector size={size} />;
   if (type === "Google Chromecast") return <Cast size={size} />;
   if (type === "Mobile Phone") return <Smartphone size={size} />;
   return <Monitor size={size} />;
@@ -1438,6 +1440,7 @@ function DepartmentAvailability({
       ? {
           "Classroom / Location Monitor": { total: 0, available: 0 },
           "Google Chromecast": { total: 0, available: 0 },
+          Projector: { total: 0, available: 0 },
           Printer: { total: 0, available: 0 },
         }
       : {};
@@ -1460,7 +1463,7 @@ function DepartmentAvailability({
 
   return <section className="panel department-availability">
     <div className="department-availability-head">
-      <div><span className="section-kicker">DEPARTMENT &amp; LOCATION OVERVIEW</span><h2>Asset availability summary</h2><p>See employee capacity and the current Chair, Table, Monitor, Printer, Chromecast, Toner and other asset totals for each department or room.</p></div>
+      <div><span className="section-kicker">DEPARTMENT &amp; LOCATION OVERVIEW</span><h2>Asset availability summary</h2><p>See employee capacity and the current Chair, Table, Monitor, Projector, Printer, Chromecast, Toner and other asset totals for each department or room.</p></div>
       <label>Department / Location<select aria-label="Availability department" value={selectedDepartment} onChange={(event) => { setSelectedDepartment(event.target.value); setSelectedType(""); }}><option>All departments</option><option>Central Stock</option><optgroup label="Departments">{departments.map((department) => <option key={department}>{department}</option>)}</optgroup>{groupLocationsByBuilding(locations).map(([building, rooms]) => <optgroup key={building} label={building}>{rooms.map((room) => <option key={room.value} value={room.value}>{room.label}</option>)}</optgroup>)}</select></label>
     </div>
     <div className="department-summary-metrics">
@@ -1619,6 +1622,7 @@ function AssetsView({
     { value: "Monitor", label: "Staff Monitors" },
     { value: "Classroom / Location Monitor", label: "Classroom / Location Monitors" },
     { value: "Google Chromecast", label: "Google Chromecast" },
+    { value: "Projector", label: "Projectors" },
     { value: "Printer", label: "Printers" },
   ];
 
@@ -2569,6 +2573,7 @@ function AssetForm({
         const typeCodePrefix =
           form.type === "Classroom / Location Monitor" ? "CLM" :
           form.type === "Google Chromecast" ? "GCC" :
+          form.type === "Projector" ? "PRJ" :
           form.type === "Printer" ? "PRN" :
           form.type.slice(0, 3).toUpperCase();
 
@@ -2714,17 +2719,19 @@ function AssetForm({
           placeholder={
             form.type === "Google Chromecast"
               ? "e.g. Google Chromecast - Lecture Hall 01"
-              : form.type === "Classroom / Location Monitor"
-                ? "e.g. Samsung 55\" Display - Lecture Hall 01"
-                : form.type === "Printer"
-                  ? "e.g. HP LaserJet Pro M404dn - Finance"
-                  : "e.g. Lenovo ThinkPad E14"
+              : form.type === "Projector"
+                ? "e.g. Epson EB-E01 Projector - Classroom 101"
+                : form.type === "Classroom / Location Monitor"
+                  ? "e.g. Samsung 32\" Display - Lecture Hall 01"
+                  : form.type === "Printer"
+                    ? "e.g. HP LaserJet Pro M404dn - Finance"
+                    : "e.g. Lenovo ThinkPad E14"
           }
           {...field("name")}
         />
       </label>
-      <label>Brand<input required placeholder={form.type === "Google Chromecast" ? "Google" : form.type === "Printer" ? "HP / Canon / Brother" : "Lenovo"} {...field("brand")} /></label>
-      <label>Model<input required readOnly={isFurniture} placeholder={form.type === "Printer" ? "LaserJet Pro M404dn" : form.type === "Google Chromecast" ? "Chromecast with Google TV 4K" : "ThinkPad E14 Gen 5"} {...field("model")} /></label>
+      <label>Brand<input required placeholder={form.type === "Google Chromecast" ? "Google" : form.type === "Projector" ? "Epson / BenQ / Sony" : form.type === "Printer" ? "HP / Canon / Brother" : "Lenovo"} {...field("brand")} /></label>
+      <label>Model<input required readOnly={isFurniture} placeholder={form.type === "Printer" ? "LaserJet Pro M404dn" : form.type === "Projector" ? "EB-E01 / MX550" : form.type === "Google Chromecast" ? "Chromecast with Google TV 4K" : "ThinkPad E14 Gen 5"} {...field("model")} /></label>
 
       {isNonIt ? (
         <label className="full">
@@ -3110,7 +3117,7 @@ function AssignForm({
       <p className="field-heading">Select one or more available items ({selected.length} selected)</p>
       {locationOnlyInStock > 0 && (
         <p className="department-note" style={{ marginTop: "-4px", marginBottom: "10px" }}>
-          Note: {locationOnlyInStock} location-allocated item{locationOnlyInStock === 1 ? "" : "s"} (Classroom / Location Monitors or Google Chromecasts) are hidden here because they are allocated to a classroom / location rather than a person.
+          Note: {locationOnlyInStock} location-allocated item{locationOnlyInStock === 1 ? "" : "s"} (Classroom / Location Monitors, Google Chromecasts, or Projectors) are hidden here because they are allocated to a classroom / location rather than a person.
         </p>
       )}
       <div className="check-list">

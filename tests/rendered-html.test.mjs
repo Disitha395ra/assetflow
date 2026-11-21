@@ -209,6 +209,7 @@ test("divides monitors into Staff vs Classroom/Location monitors and adds locati
 
   assert.match(catalog, /"Classroom \/ Location Monitor"/);
   assert.match(catalog, /"Google Chromecast"/);
+  assert.match(catalog, /"Projector"/);
   assert.match(catalog, /MONITOR_SCREEN_SIZES/);
   assert.match(catalog, /"19 inch"[\s\S]*"20 inch"[\s\S]*"21 inch"[\s\S]*"22 inch"[\s\S]*"24 inch"[\s\S]*"27 inch"[\s\S]*"32 inch"/);
   assert.doesNotMatch(catalog, /21\.5 inch|43 inch|50 inch|55 inch|65 inch|75 inch|85 inch/);

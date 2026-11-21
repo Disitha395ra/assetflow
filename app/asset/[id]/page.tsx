@@ -14,6 +14,7 @@ import {
   Monitor,
   PackageCheck,
   Printer,
+  Projector,
   ShieldCheck,
   Smartphone,
   UserRound,
@@ -81,6 +82,7 @@ export default function PublicAssetPage() {
 
   const heroIcon =
     asset.type === "Printer" ? <Printer size={38} /> :
+    asset.type === "Projector" ? <Projector size={38} /> :
     asset.type === "Google Chromecast" ? <Cast size={38} /> :
     asset.type === "Mobile Phone" ? <Smartphone size={38} /> :
     <Monitor size={38} />;

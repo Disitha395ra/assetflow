@@ -54,6 +54,7 @@ export const ASSET_TYPES = {
     "Monitor",
     "Classroom / Location Monitor",
     "Google Chromecast",
+    "Projector",
     "Printer",
     "Mouse",
     "Laptop Charger",
@@ -73,6 +74,7 @@ export const ASSET_TYPES = {
 export const LOCATION_ONLY_ASSET_TYPES = [
   "Classroom / Location Monitor",
   "Google Chromecast",
+  "Projector",
 ] as const;
 
 export function isLocationOnlyAssetType(type: string) {
@@ -182,6 +184,12 @@ export const ASSET_SPEC_FIELDS: Record<string, AssetSpecField[]> = {
     { key: "connectivity", label: "Connectivity", options: ["Wi-Fi", "Wi-Fi + Ethernet Adapter"] },
     { key: "remoteIncluded", label: "Remote included", options: ["Yes (Voice Remote)", "No"] },
   ],
+  Projector: [
+    { key: "mountType", label: "Mount / placement (optional)", options: ["Ceiling Mounted", "Table / Portable", "Wall Mounted", "Mobile Stand"], required: false },
+    { key: "connector", label: "Input connection (optional)", options: ["HDMI", "HDMI + VGA", "VGA", "Wireless + HDMI", "USB-C / HDMI"], required: false },
+    { key: "resolution", label: "Resolution (optional)", options: ["XGA", "WXGA", "Full HD (1080p)", "WUXGA", "4K UHD"], required: false },
+    { key: "remoteIncluded", label: "Remote included (optional)", options: ["Yes", "No"], required: false },
+  ],
   Printer: [
     { key: "printerType", label: "Printer type", options: ["Laser (Mono)", "Laser (Color)", "Multifunction Laser (MFP)", "Inkjet / Ink Tank", "Dot Matrix", "Thermal / Label", "Other"] },
     { key: "printColor", label: "Color mode", options: ["Monochrome (Black)", "Color (CMYK)"] },
@@ -277,6 +285,12 @@ export function getAssetKeySpecChips(asset: { type: string; specs?: Record<strin
   }
   if (asset.type === "Google Chromecast") {
     if (s.generation) chips.push(s.generation);
+    if (s.resolution) chips.push(s.resolution);
+    return chips;
+  }
+  if (asset.type === "Projector") {
+    if (s.mountType) chips.push(s.mountType);
+    if (s.connector) chips.push(s.connector);
     if (s.resolution) chips.push(s.resolution);
     return chips;
   }
