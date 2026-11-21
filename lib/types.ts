@@ -23,6 +23,12 @@ export type Asset = {
   custodianName?: string;
   custodianDepartment?: string;
   imageKey?: string;
+  warrantyStartDate?: string;
+  warrantyEndDate?: string;
+  warrantyVendor?: string;
+  warrantyInvoiceNo?: string;
+  warrantyProofUrl?: string;
+  warrantyCheckedAt?: string;
 };
 
 export type Employee = {

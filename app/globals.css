@@ -1315,6 +1315,300 @@ select.status { appearance: none; cursor: pointer; padding-right: 8px; }
   border-color: #c2410c;
 }
 
+.warranty-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 7.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.warranty-pill.warranty-active {
+  background: #ecfdf3;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+.warranty-pill.warranty-expiring {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #fdba74;
+}
+.warranty-pill.warranty-expired {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+}
+.warranty-pill.warranty-none {
+  background: #f3f4f6;
+  color: #6b7280;
+  border: 1px solid #e5e7eb;
+}
+
+.warranty-kpi-btn {
+  text-align: left;
+  cursor: pointer;
+  transition: transform .15s, border-color .15s, box-shadow .15s;
+}
+.warranty-kpi-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(39, 48, 74, .08);
+}
+.warranty-kpi-btn.selected-kpi {
+  border-color: #6d4aff;
+  box-shadow: 0 0 0 2px rgba(109, 74, 255, .15);
+}
+.metric-icon.red {
+  background: #fef2f2;
+  color: #dc2626;
+}
+.warranty-portals-panel {
+  padding: 16px 18px;
+  margin-bottom: 18px;
+}
+.warranty-portals-head h3 {
+  margin: 3px 0 4px;
+  font-size: 13px;
+}
+.warranty-portals-head p {
+  margin: 0 0 12px;
+  font-size: 8.8px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.warranty-portal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(225px, 1fr));
+  gap: 10px;
+}
+.warranty-portal-card {
+  border: 1px solid #eaecf2;
+  border-radius: 10px;
+  padding: 11px 12px;
+  background: #fbfbfd;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.warranty-portal-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.warranty-portal-top strong {
+  font-size: 10.5px;
+  color: var(--ink);
+}
+.warranty-portal-card small {
+  font-size: 8px;
+  color: #6b7280;
+  line-height: 1.4;
+}
+.warranty-portal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+.warranty-bulk-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: linear-gradient(135deg, #f5f3ff, #ede9fe);
+  border: 1.5px solid #8b5cf6;
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+}
+.warranty-bulk-bar > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #5b21b6;
+}
+.warranty-bulk-bar strong {
+  display: block;
+  font-size: 10.5px;
+}
+.warranty-bulk-bar span {
+  display: block;
+  font-size: 8.5px;
+  color: #6d28d9;
+  margin-top: 2px;
+}
+.warranty-import-preview {
+  padding: 16px 18px;
+  margin-bottom: 18px;
+  border: 1.5px solid #8b5cf6;
+}
+.warranty-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.warranty-preview-head h3 {
+  margin: 3px 0 3px;
+  font-size: 12.5px;
+}
+.warranty-preview-head p {
+  margin: 0;
+  font-size: 8.8px;
+  color: var(--muted);
+}
+.warranty-unmatched-note {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  padding: 8px 11px;
+  border-radius: 8px;
+  font-size: 8.5px;
+}
+.warranty-asset-link {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+.warranty-asset-link strong {
+  display: block;
+  font-size: 9.8px;
+  color: #1f2532;
+}
+.warranty-asset-link:hover strong {
+  color: #6d4aff;
+}
+.warranty-asset-link small {
+  display: block;
+  font-size: 7.8px;
+  color: #848b98;
+  margin-top: 2px;
+}
+.warranty-dates-cell span,
+.warranty-dates-cell small,
+.warranty-proof-cell strong,
+.warranty-proof-cell small {
+  display: block;
+}
+.warranty-dates-cell span {
+  font-size: 8.5px;
+  color: #374151;
+}
+.warranty-proof-cell strong {
+  font-size: 8.8px;
+  color: #1f2937;
+}
+.warranty-quick-durations {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.warranty-quick-durations > span {
+  font-size: 8.5px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.warranty-live-preview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: #f8f9fc;
+  border: 1px solid #e6e8f0;
+  border-radius: 9px;
+  padding: 9px 11px;
+  font-size: 8.8px;
+}
+.warranty-drawer-card {
+  border-radius: 11px;
+  padding: 13px 14px;
+  border: 1.5px solid #e6e8f0;
+  background: #f8f9fc;
+}
+.warranty-drawer-card.tone-green {
+  background: linear-gradient(135deg, #f0fdf4, #ecfdf3);
+  border-color: #86efac;
+}
+.warranty-drawer-card.tone-orange {
+  background: linear-gradient(135deg, #fff7ed, #ffedd5);
+  border-color: #f59e0b;
+}
+.warranty-drawer-card.tone-red {
+  background: linear-gradient(135deg, #fef2f2, #fee2e2);
+  border-color: #fca5a5;
+}
+.warranty-drawer-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.warranty-drawer-top strong {
+  font-size: 10.5px;
+  color: #111827;
+}
+.warranty-drawer-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  font-size: 8.5px;
+  color: #4b5563;
+  margin-bottom: 10px;
+}
+.warranty-drawer-meta strong {
+  color: #111827;
+  display: block;
+  font-size: 9px;
+}
+.warranty-drawer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.repair-warranty-alert {
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 8.8px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1.5px solid #e5e7eb;
+  background: #f9fafb;
+}
+.repair-warranty-alert.tone-green {
+  background: #ecfdf3;
+  border-color: #86efac;
+  color: #166534;
+}
+.repair-warranty-alert.tone-orange {
+  background: #fff7ed;
+  border-color: #f59e0b;
+  color: #9a3412;
+}
+.repair-warranty-alert.tone-red {
+  background: #fef2f2;
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+.repair-warranty-alert strong {
+  display: block;
+  font-size: 9.5px;
+  margin-bottom: 2px;
+}
+
 @media (max-width: 720px) {
   .zero-stock-banner {
     flex-direction: column;

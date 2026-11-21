@@ -1,5 +1,6 @@
 import { effectiveAssetStatus, getAssetKeySpecChips, isLocationOnlyAssetType, tonerMatchesPrinter } from "@/lib/catalog";
 import type { Asset, Employee, TonerStock, TonerTransaction } from "@/lib/types";
+import { getWarrantyStatus } from "@/lib/warranty";
 
 export type StyledColumn = {
   header: string;
@@ -409,6 +410,9 @@ export function buildStaffLaptopsReport(
     const emp = asset.employeeId ? employeeMap[asset.employeeId] : undefined;
     const dept = getDepartmentForSort(asset, employeeMap) || "Unassigned (Central Stock)";
     const storage = [asset.specs?.storageSize, asset.specs?.storageType].filter(Boolean).join(" ") || "—";
+    const warranty = getWarrantyStatus(asset);
+    const warrantyTone: StyledCell["tone"] =
+      warranty.tone === "green" ? "green" : warranty.tone === "orange" ? "amber" : warranty.tone === "red" ? "red" : undefined;
     return [
       { value: idx + 1, align: "center", isNumber: true },
       { value: emp?.empNo || "—", align: "center" },
@@ -424,6 +428,9 @@ export function buildStaffLaptopsReport(
       { value: asset.specs?.eCores || "—", align: "center" },
       { value: asset.specs?.ram || "—", align: "center" },
       { value: storage, align: "center" },
+      { value: asset.warrantyStartDate || "—", align: "center" },
+      { value: asset.warrantyEndDate || "—", align: "center" },
+      { value: warranty.state, align: "center", tone: warrantyTone },
       { value: effectiveAssetStatus(asset), align: "center", tone: statusTone(effectiveAssetStatus(asset)) },
       verifiedCell(asset.verified),
     ];
@@ -432,7 +439,7 @@ export function buildStaffLaptopsReport(
   const mainSheet: StyledSheet = {
     name: "All Staff Laptops",
     title: "ASSETFLOW — ALL STAFF LAPTOPS REPORT",
-    subtitle: `Generated on ${generated} · Sorted A–Z by Department · Total Laptops: ${laptops.length} · Verified: ${laptops.filter((a) => a.verified).length}`,
+    subtitle: `Generated on ${generated} · Sorted A–Z by Department · Total Laptops: ${laptops.length} · Under Warranty: ${laptops.filter((a) => { const st = getWarrantyStatus(a).state; return st === "Under Warranty" || st === "Expiring Soon"; }).length} · Verified: ${laptops.filter((a) => a.verified).length}`,
     columns: [
       { header: "#", align: "center", minWidth: 6 },
       { header: "Emp No", align: "center", minWidth: 12 },
@@ -448,11 +455,14 @@ export function buildStaffLaptopsReport(
       { header: "No. of E-Cores", align: "center", minWidth: 14 },
       { header: "RAM", align: "center", minWidth: 10 },
       { header: "Storage", align: "center", minWidth: 16 },
+      { header: "Warranty Start", align: "center", minWidth: 14 },
+      { header: "Warranty End", align: "center", minWidth: 14 },
+      { header: "Warranty Status", align: "center", minWidth: 16 },
       { header: "Status", align: "center", minWidth: 12 },
       { header: "Asset Verified (Yes/No)", align: "center", minWidth: 20 },
     ],
     rows,
-    footerRow: ["", "", `Total Laptops: ${laptops.length}`, "", "", "", "", "", "", "", "", "", "", "", "", `Verified: ${laptops.filter((a) => a.verified).length}/${laptops.length}`],
+    footerRow: ["", "", `Total Laptops: ${laptops.length}`, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", `Verified: ${laptops.filter((a) => a.verified).length}/${laptops.length}`],
   };
 
   return {
@@ -1188,5 +1198,195 @@ export function buildZeroStockTonerRequisitionReport(
   return {
     sheets: [zeroSheet, lowSheet, historySheet],
     filename: `AssetFlow-Zero-Stock-Toner-Requisition-Admin-${isoDate()}.xlsx`,
+  };
+}
+
+// ============================================================
+// WARRANTY STATUS REPORT & BULK IMPORT TEMPLATE (ALL IT ASSETS)
+// ============================================================
+export function buildWarrantyStatusReport(
+  assets: Asset[],
+  employeeMap: Record<string, Employee>,
+  scopeLabel = "All-IT-Assets",
+): { sheets: StyledSheet[]; filename: string } {
+  const generated = formattedDateLabel();
+  const itAssets = sortAssetsByDepartmentAZ(
+    assets.filter((a) => a.category === "IT Asset" && a.status !== "Retired"),
+    employeeMap,
+  );
+
+  const toneForWarranty = (tone: "green" | "orange" | "red" | "muted"): StyledCell["tone"] =>
+    tone === "green" ? "green" : tone === "orange" ? "amber" : tone === "red" ? "red" : undefined;
+
+  const registerRows: StyledCell[][] = itAssets.map((asset, idx) => {
+    const emp = asset.employeeId ? employeeMap[asset.employeeId] : undefined;
+    const dept = getDepartmentForSort(asset, employeeMap) || "Central Stock";
+    const warranty = getWarrantyStatus(asset);
+    return [
+      { value: idx + 1, align: "center", isNumber: true },
+      { value: asset.code, align: "center" },
+      { value: asset.type, align: "center" },
+      { value: asset.name },
+      { value: asset.brand || "—" },
+      { value: asset.model || "—" },
+      { value: asset.serial || "" },
+      { value: emp?.empNo || "—", align: "center" },
+      { value: emp?.name || (asset.assignedDepartment ? `${asset.assignedDepartment} (Dept)` : asset.location || "Unassigned") },
+      { value: dept },
+      { value: asset.warrantyStartDate || "", align: "center" },
+      { value: asset.warrantyEndDate || "", align: "center" },
+      { value: warranty.state, align: "center", tone: toneForWarranty(warranty.tone) },
+      { value: warranty.daysRemaining !== null ? warranty.daysRemaining : "—", align: "center", isNumber: warranty.daysRemaining !== null },
+      { value: asset.warrantyVendor || "" },
+      { value: asset.warrantyInvoiceNo || "" },
+      { value: asset.warrantyProofUrl || "" },
+      { value: asset.warrantyCheckedAt || "—", align: "center" },
+    ];
+  });
+
+  const activeCount = itAssets.filter((a) => getWarrantyStatus(a).state === "Under Warranty").length;
+  const expiringCount = itAssets.filter((a) => getWarrantyStatus(a).state === "Expiring Soon").length;
+  const expiredCount = itAssets.filter((a) => getWarrantyStatus(a).state === "Expired").length;
+  const missingCount = itAssets.filter((a) => getWarrantyStatus(a).state === "Not Recorded").length;
+
+  const registerSheet: StyledSheet = {
+    name: "Warranty Register",
+    title: "ASSETFLOW — IT ASSET WARRANTY REGISTER & BULK IMPORT TEMPLATE",
+    subtitle: `Generated on ${generated} · Total IT Assets: ${itAssets.length} · Under Warranty: ${activeCount} · Expiring Soon: ${expiringCount} · Expired: ${expiredCount} · Missing: ${missingCount} · Tip: Fill Start/End Dates (YYYY-MM-DD) & re-import directly into Warranty Tracker`,
+    columns: [
+      { header: "#", align: "center", minWidth: 6 },
+      { header: "Asset Code", align: "center", minWidth: 15 },
+      { header: "Asset Type", align: "center", minWidth: 16 },
+      { header: "Asset Name", minWidth: 24 },
+      { header: "Brand", minWidth: 12 },
+      { header: "Model", minWidth: 20 },
+      { header: "Serial Number", minWidth: 20 },
+      { header: "Emp No", align: "center", minWidth: 11 },
+      { header: "Custodian / Allocation", minWidth: 22 },
+      { header: "Department", minWidth: 20 },
+      { header: "Warranty Start Date", align: "center", minWidth: 18 },
+      { header: "Warranty End Date", align: "center", minWidth: 18 },
+      { header: "Warranty Status", align: "center", minWidth: 16 },
+      { header: "Days Remaining", align: "center", minWidth: 14 },
+      { header: "Vendor / Supplier", minWidth: 20 },
+      { header: "Invoice / PO No", minWidth: 18 },
+      { header: "Warranty Proof URL", minWidth: 26 },
+      { header: "Last Checked", align: "center", minWidth: 14 },
+    ],
+    rows: registerRows,
+    footerRow: [
+      "",
+      `Total: ${itAssets.length}`,
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      `Active: ${activeCount} | Expiring: ${expiringCount}`,
+      "",
+      `Expired: ${expiredCount}`,
+      `Missing: ${missingCount}`,
+      "",
+      "",
+    ],
+  };
+
+  const attentionAssets = itAssets.filter((a) => {
+    const st = getWarrantyStatus(a).state;
+    return st === "Expiring Soon" || st === "Expired" || st === "Not Recorded";
+  });
+
+  const attentionSheet: StyledSheet = {
+    name: "Expiring & Missing",
+    title: "WARRANTY ACTION LIST — EXPIRING SOON, EXPIRED & MISSING DATES",
+    subtitle: `Generated on ${generated} · Items requiring attention or verification: ${attentionAssets.length}`,
+    columns: [
+      { header: "#", align: "center", minWidth: 6 },
+      { header: "Asset Code", align: "center", minWidth: 15 },
+      { header: "Asset Type", align: "center", minWidth: 16 },
+      { header: "Brand", minWidth: 12 },
+      { header: "Model", minWidth: 20 },
+      { header: "Serial Number", minWidth: 20 },
+      { header: "Department", minWidth: 20 },
+      { header: "Warranty End Date", align: "center", minWidth: 18 },
+      { header: "Warranty Status", align: "center", minWidth: 16 },
+      { header: "Action Note", minWidth: 30 },
+    ],
+    rows: attentionAssets.map((asset, idx) => {
+      const warranty = getWarrantyStatus(asset);
+      const dept = getDepartmentForSort(asset, employeeMap) || "Central Stock";
+      const note =
+        warranty.state === "Expiring Soon"
+          ? `Check hardware before expiry (${warranty.daysRemaining}d left)`
+          : warranty.state === "Expired"
+            ? "Out of manufacturer warranty — paid repair only"
+            : "Verify serial on official brand portal or supplier invoice";
+      return [
+        { value: idx + 1, align: "center", isNumber: true },
+        { value: asset.code, align: "center" },
+        { value: asset.type, align: "center" },
+        { value: asset.brand || "—" },
+        { value: asset.model || "—" },
+        { value: asset.serial || "—" },
+        { value: dept },
+        { value: asset.warrantyEndDate || "—", align: "center" },
+        { value: warranty.state, align: "center", tone: toneForWarranty(warranty.tone) },
+        { value: note },
+      ];
+    }),
+    footerRow: ["", `Action Items: ${attentionAssets.length}`, "", "", "", "", "", "", "", ""],
+  };
+
+  const byBrand = new Map<string, { total: number; active: number; expiring: number; expired: number; missing: number }>();
+  for (const asset of itAssets) {
+    const brand = (asset.brand || "Unspecified").trim();
+    const cur = byBrand.get(brand) ?? { total: 0, active: 0, expiring: 0, expired: 0, missing: 0 };
+    const st = getWarrantyStatus(asset).state;
+    cur.total += 1;
+    if (st === "Under Warranty") cur.active += 1;
+    else if (st === "Expiring Soon") cur.expiring += 1;
+    else if (st === "Expired") cur.expired += 1;
+    else cur.missing += 1;
+    byBrand.set(brand, cur);
+  }
+
+  const brandRows: StyledCell[][] = Array.from(byBrand.entries())
+    .sort((a, b) => b[1].total - a[1].total || a[0].localeCompare(b[0]))
+    .map(([brand, stats], idx) => [
+      { value: idx + 1, align: "center", isNumber: true },
+      { value: brand },
+      { value: stats.total, align: "center", isNumber: true },
+      { value: stats.active, align: "center", tone: stats.active > 0 ? "green" : undefined, isNumber: true },
+      { value: stats.expiring, align: "center", tone: stats.expiring > 0 ? "amber" : undefined, isNumber: true },
+      { value: stats.expired, align: "center", tone: stats.expired > 0 ? "red" : undefined, isNumber: true },
+      { value: stats.missing, align: "center", isNumber: true },
+    ]);
+
+  const brandSheet: StyledSheet = {
+    name: "Brand Summary",
+    title: "WARRANTY COVERAGE SUMMARY BY BRAND",
+    subtitle: `Generated on ${generated} · Brands tracked: ${brandRows.length}`,
+    columns: [
+      { header: "#", align: "center", minWidth: 6 },
+      { header: "Brand", minWidth: 20 },
+      { header: "Total IT Assets", align: "center", minWidth: 16 },
+      { header: "Under Warranty", align: "center", minWidth: 16 },
+      { header: "Expiring Soon", align: "center", minWidth: 15 },
+      { header: "Expired", align: "center", minWidth: 12 },
+      { header: "Not Recorded", align: "center", minWidth: 15 },
+    ],
+    rows: brandRows,
+    footerRow: ["", "TOTAL", itAssets.length, activeCount, expiringCount, expiredCount, missingCount],
+  };
+
+  const cleanScope = scopeLabel.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-|-$/g, "") || "All-IT-Assets";
+  return {
+    sheets: [registerSheet, attentionSheet, brandSheet],
+    filename: `AssetFlow-Warranty-${cleanScope}-${isoDate()}.xlsx`,
   };
 }
