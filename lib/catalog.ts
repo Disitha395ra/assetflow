@@ -302,11 +302,26 @@ export function tonerMatchesPrinter(
   return false;
 }
 
+export const ASSET_CONDITIONS = [
+  "Excellent",
+  "Good",
+  "Fair",
+  "Repair",
+  "Damage",
+] as const;
+
 export function effectiveAssetStatus(asset: { status: string; condition?: string }): string {
-  if (asset.condition === "Repair" && asset.status !== "Retired") {
-    return "In repair";
-  }
+  if (asset.status === "Retired") return "Retired";
+  if (asset.condition === "Damage") return "Damage";
+  if (asset.condition === "Repair") return "In repair";
   return asset.status;
+}
+
+export function conditionClassName(condition: string, baseClass: string): string {
+  const c = (condition || "").trim().toLowerCase();
+  if (c === "damage") return `${baseClass} condition-damage`;
+  if (c === "repair") return `${baseClass} condition-repair`;
+  return baseClass;
 }
 
 export function matchesSearchQuery(query: string, fields: (string | undefined | null)[]): boolean {

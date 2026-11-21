@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   ArrowDownToLine,
   ArrowLeftRight,
-  BadgeCheck,
   Bell,
   Building2,
   CalendarClock,
@@ -72,11 +71,13 @@ import {
   type RequirementWindowRecord,
 } from "@/lib/firebase";
 import {
+  ASSET_CONDITIONS,
   ASSET_SPEC_FIELDS,
   ASSET_TYPES,
   DEFAULT_DEPARTMENTS,
   DEFAULT_LOCATIONS,
   FURNITURE_IMAGE_OPTIONS,
+  conditionClassName,
   effectiveAssetStatus,
   formatSpecLabel,
   furnitureImageForAsset,
@@ -95,7 +96,6 @@ import {
   TonerStockActionForm,
   tonerStockStatus,
 } from "@/components/PrintersTonersView";
-import { WarrantyHubView } from "@/components/WarrantyHubView";
 import {
   buildEmployeeItAssetsReport,
   buildPrinterAndTonerReport,
@@ -121,7 +121,6 @@ type View =
   | "Dashboard"
   | "Assets"
   | "Printers & Toners"
-  | "Warranty"
   | "Employees"
   | "Movements"
   | "Requirements"
@@ -131,7 +130,6 @@ const nav = [
   { name: "Dashboard" as View, icon: LayoutDashboard },
   { name: "Assets" as View, icon: Package },
   { name: "Printers & Toners" as View, icon: Printer },
-  { name: "Warranty" as View, icon: BadgeCheck },
   { name: "Employees" as View, icon: Users },
   { name: "Movements" as View, icon: ArrowLeftRight },
   { name: "Requirements" as View, icon: CalendarClock },
@@ -720,7 +718,7 @@ export default function Home() {
   const totalAlerts = pendingRequirements + lowStockToners + repairAssetsCount;
   const healthyAssets = assets.filter((asset) => {
     const st = effectiveAssetStatus(asset);
-    return st !== "In repair" && st !== "Retired";
+    return st !== "In repair" && st !== "Damage" && st !== "Retired";
   }).length;
   const inventoryHealth = assets.length ? Math.round((healthyAssets / assets.length) * 100) : 100;
 
@@ -769,7 +767,6 @@ export default function Home() {
               <Icon size={19} />{name}
               {name === "Requirements" && pendingRequirements > 0 && <span className="nav-count">{pendingRequirements}</span>}
               {name === "Printers & Toners" && lowStockToners > 0 && <span className="nav-count">{lowStockToners}</span>}
-              {name === "Warranty" && <span className="nav-dev-tag">Dev</span>}
             </button>
           ))}
           <p className="nav-label second">MANAGEMENT</p>
@@ -930,16 +927,6 @@ export default function Home() {
               onStockAction={(toner, mode, presetPrinterId) => { setTonerAction({ toner, mode, presetPrinterId }); setModal("tonerStock"); }}
               onExport={() => exportWorkbook(printerAssets)}
               onDownloadZeroStockReport={downloadZeroStockTonerReport}
-            />
-          )}
-          {view === "Warranty" && (
-            <WarrantyHubView
-              onBackToDashboard={() => setView("Dashboard")}
-              onViewAssets={() => {
-                setCategory("IT Asset");
-                setAssetTypeFilter("All");
-                setView("Assets");
-              }}
             />
           )}
           {view === "Employees" && (
@@ -1571,7 +1558,7 @@ function DepartmentAvailability({
     ) : selectedType && (
       <div className="available-asset-details" id="available-asset-details">
         <div className="available-asset-details-head"><div><span>AVAILABLE ASSETS</span><h3>{selectedType} · {selectedDepartment}</h3></div><strong>{selectedAvailableAssets.length} item{selectedAvailableAssets.length === 1 ? "" : "s"}</strong></div>
-        {selectedAvailableAssets.length ? <div className="available-asset-list">{selectedAvailableAssets.map((asset) => { const furniture = furnitureImageForAsset(asset); const keySpecs = getAssetKeySpecChips(asset); return <button type="button" key={asset.id} onClick={() => onAsset(asset)}><span className={furniture ? "available-asset-icon has-image" : "available-asset-icon"}>{furniture ? <img src={furniture.src} alt="" /> : assetTypeIcon(asset.type, 18)}</span><span className="available-asset-main"><strong>{asset.name}</strong><small>{asset.code} · {asset.category}</small></span><span className="available-asset-spec"><strong>{[asset.brand, asset.model].filter(Boolean).join(" · ") || "Brand / model not recorded"}</strong><small>{keySpecs.length ? keySpecs.join(" · ") : (asset.serial || asset.location || "No serial or location")}</small></span><span className={asset.condition.toLowerCase() === "repair" ? "available-asset-condition condition-repair" : "available-asset-condition"}>{asset.condition}</span><ExternalLink size={15} /></button>; })}</div> : <div className="available-asset-empty"><ClipboardCheck size={19} /><div><strong>No available {selectedType.toLowerCase()} items</strong><span>This department has {typeSummary.find(([type]) => type === selectedType)?.[1].total ?? 0} recorded, but all are currently assigned or otherwise unavailable.</span></div></div>}
+        {selectedAvailableAssets.length ? <div className="available-asset-list">{selectedAvailableAssets.map((asset) => { const furniture = furnitureImageForAsset(asset); const keySpecs = getAssetKeySpecChips(asset); return <button type="button" key={asset.id} onClick={() => onAsset(asset)}><span className={furniture ? "available-asset-icon has-image" : "available-asset-icon"}>{furniture ? <img src={furniture.src} alt="" /> : assetTypeIcon(asset.type, 18)}</span><span className="available-asset-main"><strong>{asset.name}</strong><small>{asset.code} · {asset.category}</small></span><span className="available-asset-spec"><strong>{[asset.brand, asset.model].filter(Boolean).join(" · ") || "Brand / model not recorded"}</strong><small>{keySpecs.length ? keySpecs.join(" · ") : (asset.serial || asset.location || "No serial or location")}</small></span><span className={conditionClassName(asset.condition, "available-asset-condition")}>{asset.condition}</span><ExternalLink size={15} /></button>; })}</div> : <div className="available-asset-empty"><ClipboardCheck size={19} /><div><strong>No available {selectedType.toLowerCase()} items</strong><span>This department has {typeSummary.find(([type]) => type === selectedType)?.[1].total ?? 0} recorded, but all are currently assigned or otherwise unavailable.</span></div></div>}
       </div>
     )}
     <button className="department-summary-link" onClick={onViewAssets}>Open full asset register →</button>
@@ -1700,7 +1687,7 @@ function AssetsView({
       )}
 
       <section className="panel table-panel">
-        <div className="table-toolbar"><div><strong>Asset register</strong><small>{filtered.length} matching records</small></div><div className="legend"><span><i className="dot green" />Available</span><span><i className="dot blue" />Assigned / Allocated</span><span><i className="dot orange" />Repair</span></div></div>
+        <div className="table-toolbar"><div><strong>Asset register</strong><small>{filtered.length} matching records</small></div><div className="legend"><span><i className="dot green" />Available</span><span><i className="dot blue" />Assigned / Allocated</span><span><i className="dot orange" />Repair</span><span><i className="dot red" />Damage</span></div></div>
         <AssetTable assets={filtered} employeeMap={employeeMap} onAsset={onAsset} />
       </section>
 
@@ -2328,7 +2315,7 @@ function AssetDrawer({
               {asset.category === "IT Asset" ? <label>Serial number<strong>{asset.serial || "Not recorded"}</strong></label> : <label>Current location<strong>{asset.location || asset.custodianDepartment || "Not recorded"}</strong></label>}
               {asset.category === "IT Asset" && asset.location && <label>Classroom / Location<strong>{asset.location}</strong></label>}
               {asset.assignedDepartment && <label>Assigned department<strong>{asset.assignedDepartment}</strong></label>}
-              <label>Condition<strong>{asset.condition}</strong></label>
+              <label>Condition<strong><span className={conditionClassName(asset.condition, "document-condition")}>{asset.condition}</span></strong></label>
               <label>Asset verified<strong>{asset.verified ? "Yes" : "No"}</strong></label>
               <label>Category<strong>{asset.category}</strong></label>
               <label>Type<strong>{asset.type}</strong></label>
@@ -2939,7 +2926,7 @@ function AssetForm({
           </label>
         );
       })}
-      <label>Condition<select {...field("condition")}><option>Excellent</option><option>Good</option><option>Fair</option><option>Repair</option></select></label>
+      <label>Condition<select {...field("condition")}>{ASSET_CONDITIONS.map((cond) => <option key={cond}>{cond}</option>)}</select></label>
       <label>Asset verified (Yes/No)<select {...field("verified")}><option value="No">No</option><option value="Yes">Yes</option></select></label>
       <label className="full">Additional notes<textarea placeholder="Warranty, accessories or any other information…" {...field("details")} /></label>
       <FormActions text={initial ? "Update asset" : "Add asset"} />
@@ -3455,7 +3442,7 @@ function PrintableDocument({
     );
   }
 
-  return <div><div className="document-controls"><label>Employee<select value={employeeId} disabled={Boolean(initialEmployeeId)} onChange={(event) => { const nextId = event.target.value; setEmployeeId(nextId); setSelected(assets.filter((asset) => asset.employeeId === nextId).map((asset) => asset.id)); }}>{employees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><button className="button button-primary" disabled={!employee || !included.length} onClick={() => window.print()}><Printer size={17} />Print / Save PDF</button></div><div className="document-item-picker"><div><strong>Select items for this document</strong><span>{selected.length} of {owned.length} included</span></div><div>{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} />{asset.name}<small>{asset.code}</small></label>)}</div></div><article className="print-document"><div className="document-accent" /><header><div><strong>ASSETFLOW</strong><span>Company Asset Management · Official Record</span></div><p>{type}</p></header><div className="document-title"><span>{type.toUpperCase()}</span><h1>{employee?.name || "Select an employee"}</h1><p>{employee ? `${employee.empNo} · ${employee.designation} · ${employee.department}` : "No employee selected"}</p></div><div className="document-meta"><span>Document date<strong>{new Date().toLocaleDateString("en-GB")}</strong></span><span>Reference<strong>AF-{employee?.empNo || "UNASSIGNED"}-{type.replaceAll(" ", "-").toUpperCase()}</strong></span><span>Items covered<strong>{included.length}</strong></span></div><table><thead><tr><th>#</th><th>Asset / item</th><th>Asset code</th><th>Serial / location</th><th>Condition</th></tr></thead><tbody>{included.map((asset, index) => { const chips = getAssetKeySpecChips(asset); return <tr key={asset.id}><td>{String(index + 1).padStart(2, "0")}</td><td><strong>{asset.name}</strong><small>{[chips.join(" · "), asset.details].filter(Boolean).join(" — ")}</small></td><td>{asset.code}</td><td>{asset.serial || asset.location || "—"}</td><td><span className={asset.condition.toLowerCase() === "repair" ? "document-condition condition-repair" : "document-condition"}>{asset.condition}</span></td></tr>; })}</tbody></table><p className="document-statement">{returnDocument ? "The assets listed above have been returned to the company and verified by the responsible department. Any exception or damage must be recorded before final employee clearance is approved." : "I acknowledge receipt and responsibility for the company assets listed above. I agree to use them only for authorised company work, take reasonable care of them, and return them in good condition when requested."}</p><div className="signature-grid"><span>Employee signature<small>Name, signature & date</small></span><span>Issued / received by<small>Asset Administration</small></span><span>Authorised by<small>Department Head</small></span></div><footer><strong>AssetFlow verified document</strong><span>Generated from the live company asset register · {new Date().toLocaleString("en-GB")}</span></footer></article></div>;
+  return <div><div className="document-controls"><label>Employee<select value={employeeId} disabled={Boolean(initialEmployeeId)} onChange={(event) => { const nextId = event.target.value; setEmployeeId(nextId); setSelected(assets.filter((asset) => asset.employeeId === nextId).map((asset) => asset.id)); }}>{employees.map((row) => <option key={row.id} value={row.id}>{row.name}</option>)}</select></label><button className="button button-primary" disabled={!employee || !included.length} onClick={() => window.print()}><Printer size={17} />Print / Save PDF</button></div><div className="document-item-picker"><div><strong>Select items for this document</strong><span>{selected.length} of {owned.length} included</span></div><div>{owned.map((asset) => <label key={asset.id}><input type="checkbox" checked={selected.includes(asset.id)} onChange={() => setSelected((rows) => rows.includes(asset.id) ? rows.filter((id) => id !== asset.id) : [...rows, asset.id])} />{asset.name}<small>{asset.code}</small></label>)}</div></div><article className="print-document"><div className="document-accent" /><header><div><strong>ASSETFLOW</strong><span>Company Asset Management · Official Record</span></div><p>{type}</p></header><div className="document-title"><span>{type.toUpperCase()}</span><h1>{employee?.name || "Select an employee"}</h1><p>{employee ? `${employee.empNo} · ${employee.designation} · ${employee.department}` : "No employee selected"}</p></div><div className="document-meta"><span>Document date<strong>{new Date().toLocaleDateString("en-GB")}</strong></span><span>Reference<strong>AF-{employee?.empNo || "UNASSIGNED"}-{type.replaceAll(" ", "-").toUpperCase()}</strong></span><span>Items covered<strong>{included.length}</strong></span></div><table><thead><tr><th>#</th><th>Asset / item</th><th>Asset code</th><th>Serial / location</th><th>Condition</th></tr></thead><tbody>{included.map((asset, index) => { const chips = getAssetKeySpecChips(asset); return <tr key={asset.id}><td>{String(index + 1).padStart(2, "0")}</td><td><strong>{asset.name}</strong><small>{[chips.join(" · "), asset.details].filter(Boolean).join(" — ")}</small></td><td>{asset.code}</td><td>{asset.serial || asset.location || "—"}</td><td><span className={conditionClassName(asset.condition, "document-condition")}>{asset.condition}</span></td></tr>; })}</tbody></table><p className="document-statement">{returnDocument ? "The assets listed above have been returned to the company and verified by the responsible department. Any exception or damage must be recorded before final employee clearance is approved." : "I acknowledge receipt and responsibility for the company assets listed above. I agree to use them only for authorised company work, take reasonable care of them, and return them in good condition when requested."}</p><div className="signature-grid"><span>Employee signature<small>Name, signature & date</small></span><span>Issued / received by<small>Asset Administration</small></span><span>Authorised by<small>Department Head</small></span></div><footer><strong>AssetFlow verified document</strong><span>Generated from the live company asset register · {new Date().toLocaleString("en-GB")}</span></footer></article></div>;
 }
 
 function QrBatch({ assets, employees, departments, locations, employeeMap }: { assets: Asset[]; employees: Employee[]; departments: string[]; locations: string[]; employeeMap: Record<string, Employee> }) {

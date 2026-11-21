@@ -89,7 +89,7 @@ export async function POST(req: Request) {
           <td style="padding: 12px 14px; color: #334155; font-size: 13px;">${escapeHtml(asset.type)} (${escapeHtml(asset.category)})</td>
           <td style="padding: 12px 14px; color: #334155; font-size: 13px;">${escapeHtml(asset.serial || asset.location || "N/A")}</td>
           <td style="padding: 12px 14px; color: #334155; font-size: 13px;">
-            <span style="display: inline-block; padding: 2px 8px; border-radius: 9999px; background: ${asset.condition?.toLowerCase() === "repair" ? "#fff3e5" : "#e0f2fe"}; color: ${asset.condition?.toLowerCase() === "repair" ? "#c87518" : "#0369a1"}; font-weight: 500; font-size: 12px;">${escapeHtml(asset.condition || "Good")}</span>
+            <span style="display: inline-block; padding: 2px 8px; border-radius: 9999px; background: ${asset.condition?.toLowerCase() === "damage" ? "#fef2f2" : asset.condition?.toLowerCase() === "repair" ? "#fff3e5" : "#e0f2fe"}; color: ${asset.condition?.toLowerCase() === "damage" ? "#dc2626" : asset.condition?.toLowerCase() === "repair" ? "#c87518" : "#0369a1"}; font-weight: 500; font-size: 12px;">${escapeHtml(asset.condition || "Good")}</span>
           </td>
         </tr>
       `

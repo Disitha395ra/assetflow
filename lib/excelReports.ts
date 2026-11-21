@@ -290,7 +290,7 @@ function statusTone(status: string): StyledCell["tone"] {
   if (s === "available" || s === "in stock" || s === "yes" || s === "active" || s === "restock") return "green";
   if (s === "assigned" || s === "issued") return "blue";
   if (s === "in repair" || s === "repair" || s === "low stock" || s === "pending") return "amber";
-  if (s === "retired" || s === "out of stock" || s === "no" || s === "resigned") return "red";
+  if (s === "damage" || s === "damaged" || s === "retired" || s === "out of stock" || s === "no" || s === "resigned") return "red";
   return undefined;
 }
 

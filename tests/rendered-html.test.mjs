@@ -345,18 +345,29 @@ test("detects duplicate employees, supports safe merge/delete, and prevents dupl
   assert.match(css, /\.employee-delete-btn/);
 });
 
-test("marks the Warranty Tracker section as under development", async () => {
-  const [warrantyHub, page, css] = await Promise.all([
-    readFile(new URL("../components/WarrantyHubView.tsx", import.meta.url), "utf8"),
+test("supports red Damage condition tag alongside Good, Excellent, Fair, and orange Repair without a Warranty tab", async () => {
+  const [catalog, page, publicAsset, excelReports, css] = await Promise.all([
+    readFile(new URL("../lib/catalog.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/asset/[id]/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/excelReports.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
-  assert.match(warrantyHub, /Under Development/);
-  assert.match(warrantyHub, /This feature is still under development/);
-  assert.match(page, /WarrantyHubView/);
-  assert.match(page, /name: "Warranty" as View/);
-  assert.match(css, /\.under-dev-panel/);
+  assert.match(catalog, /ASSET_CONDITIONS/);
+  assert.match(catalog, /"Damage"/);
+  assert.match(catalog, /conditionClassName/);
+  assert.match(catalog, /if \(asset\.condition === "Damage"\) return "Damage"/);
+  assert.match(page, /ASSET_CONDITIONS\.map/);
+  assert.match(page, /dot red/);
+  assert.doesNotMatch(page, /WarrantyHubView/);
+  assert.doesNotMatch(page, /name: "Warranty" as View/);
+  assert.match(publicAsset, /conditionClassName/);
+  assert.match(excelReports, /s === "damage"/);
+  assert.match(css, /\.status-damage/);
+  assert.match(css, /\.available-asset-condition\.condition-damage/);
+  assert.match(css, /\.document-condition\.condition-damage/);
+  assert.match(css, /\.public-status-damage/);
 });
 
 

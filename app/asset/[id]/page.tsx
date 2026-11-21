@@ -22,7 +22,7 @@ import {
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { firebaseReady, getRecord, watchCollection } from "@/lib/firebase";
-import { effectiveAssetStatus, formatSpecLabel, furnitureImageForAsset, isLocationOnlyAssetType } from "@/lib/catalog";
+import { conditionClassName, effectiveAssetStatus, formatSpecLabel, furnitureImageForAsset, isLocationOnlyAssetType } from "@/lib/catalog";
 
 type PublicAsset = {
   id: string;
@@ -113,7 +113,7 @@ export default function PublicAssetPage() {
               {asset.assignedDepartment && <label>Assigned department<strong>{asset.assignedDepartment}</strong></label>}
               <label>Category<strong>{asset.category}</strong></label>
               <label>Asset type<strong>{asset.type}</strong></label>
-              <label>Condition<strong>{asset.condition}</strong></label>
+              <label>Condition<strong><span className={conditionClassName(asset.condition, "document-condition")}>{asset.condition}</span></strong></label>
               <label>Asset verified<strong>{asset.verified ? "Yes" : "No"}</strong></label>
               {Object.entries(asset.specs ?? {}).filter(([, value]) => value).map(([key, value]) => <label key={key}>{formatSpecLabel(key)}<strong>{value}</strong></label>)}
             </div>
