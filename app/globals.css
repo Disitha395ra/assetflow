@@ -234,6 +234,24 @@ select:focus, input:focus, textarea:focus { border-color: #8c73ee; box-shadow: 0
 .employee-foot strong { font-size: 9px; }
 .employee-foot > div { display: flex; align-items: center; gap: 8px; }
 .employee-foot button { border: 0; background: transparent; color: #6947df; font-size: 8.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 3px; }
+.employee-foot button.employee-delete-btn { color: #d64545; }
+.employee-foot button.employee-delete-btn:disabled { color: #b7becb; cursor: not-allowed; }
+.employee-card.employee-card-duplicate { border: 1.5px solid #f59e0b; background: linear-gradient(180deg, #fffdf9, #fff7ed); }
+.duplicate-pill { display: inline-flex; align-items: center; gap: 4px; background: #ffedd5; color: #c2410c; border: 1px solid #fdba74; border-radius: 99px; padding: 2px 8px; font-size: 7.5px; font-weight: 800; }
+.duplicate-employees-banner { background: linear-gradient(135deg, #fff7ed, #ffedd5); border: 1.5px solid #f59e0b; border-radius: 13px; padding: 15px 18px; margin-bottom: 18px; }
+.duplicate-banner-head { display: flex; align-items: center; gap: 11px; color: #9a3412; margin-bottom: 12px; }
+.duplicate-banner-head strong { display: block; font-size: 11px; color: #9a3412; }
+.duplicate-banner-head span { display: block; font-size: 8.5px; color: #c2410c; margin-top: 2px; }
+.duplicate-groups-list { display: flex; flex-direction: column; gap: 10px; }
+.duplicate-group-row { background: white; border: 1px solid #fed7aa; border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.duplicate-group-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.duplicate-group-meta strong { font-size: 10.5px; color: #1d2230; }
+.duplicate-group-meta small { font-size: 8.5px; color: #9a3412; font-weight: 600; }
+.duplicate-records-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; }
+.duplicate-record-chip { border: 1px solid #eceef4; border-radius: 9px; padding: 9px 11px; background: #fbfbfd; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.duplicate-record-chip strong { display: block; font-size: 9.5px; color: #1d2230; }
+.duplicate-record-chip small { display: block; font-size: 7.8px; color: #6e7585; margin-top: 2px; }
+.form-error-inline { grid-column: 1 / -1; background: #fff1f2; border: 1px solid #fecdd3; color: #be123c; border-radius: 9px; padding: 9px 12px; font-size: 9px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 
 .audit-badge { color: #546072; background: #f5f6f8; padding: 6px 8px; border-radius: 7px; font-size: 8px; display: inline-flex; align-items: center; gap: 5px; }
 .timeline { padding: 5px 24px 25px; }

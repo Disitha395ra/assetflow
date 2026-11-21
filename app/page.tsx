@@ -41,6 +41,7 @@ import {
   Settings,
   ShieldCheck,
   Smartphone,
+  Trash2,
   Users,
   Wrench,
   X,
@@ -56,6 +57,7 @@ import {
   firebaseReady,
   getRequirementWindow,
   listRecords,
+  mergeDuplicateEmployeeRecord,
   removeRecord,
   saveRecord,
   saveRequirementWindow,
@@ -390,6 +392,60 @@ export default function Home() {
     setToners((rows) => rows.filter((row) => row.id !== toner.id));
     await removeRecord("toners", toner.id);
     flash(`${toner.tonerModel} removed from toner stock`);
+  }
+
+  async function deleteEmployee(employee: Employee) {
+    const owned = assets.filter((asset) => asset.employeeId === employee.id);
+    if (owned.length > 0) {
+      flash(`Cannot delete ${employee.name} (${employee.empNo}) while ${owned.length} asset(s) are assigned — merge duplicate or return assets first.`);
+      return;
+    }
+    if (!window.confirm(`Remove employee "${employee.name}" (${employee.empNo} · ${employee.department})?`)) {
+      return;
+    }
+    setEmployees((rows) => rows.filter((row) => row.id !== employee.id));
+    await removeRecord("employees", employee.id);
+    if (editingEmployee?.id === employee.id) {
+      setEditingEmployee(null);
+      setModal(null);
+    }
+    flash(`Removed employee ${employee.name} (${employee.empNo})`);
+  }
+
+  async function mergeDuplicateEmployee(keep: Employee, duplicate: Employee) {
+    if (keep.id === duplicate.id) return;
+    const assetsToMove = assets.filter((asset) => asset.employeeId === duplicate.id);
+    const movementsToMove = movements.filter((movement) => movement.employeeId === duplicate.id);
+    const confirmMsg = assetsToMove.length > 0
+      ? `Keep "${keep.name}" (${keep.empNo}) and remove the duplicate entry? ${assetsToMove.length} assigned asset(s) and ${movementsToMove.length} history record(s) from the duplicate will be safely transferred to the kept record.`
+      : `Keep "${keep.name}" (${keep.empNo}) and permanently remove the duplicate entry (${duplicate.email || duplicate.department})?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    if (assetsToMove.length > 0) {
+      setAssets((rows) =>
+        rows.map((row) =>
+          row.employeeId === duplicate.id
+            ? { ...row, employeeId: keep.id, custodianName: keep.name, custodianDepartment: keep.department }
+            : row,
+        ),
+      );
+    }
+    if (movementsToMove.length > 0) {
+      setMovements((rows) =>
+        rows.map((row) =>
+          row.employeeId === duplicate.id
+            ? { ...row, employeeId: keep.id, employeeName: keep.name, department: keep.department }
+            : row,
+        ),
+      );
+    }
+    setEmployees((rows) => rows.filter((row) => row.id !== duplicate.id));
+    await mergeDuplicateEmployeeRecord(keep, duplicate.id, assetsToMove, movementsToMove);
+    flash(
+      assetsToMove.length > 0
+        ? `Removed duplicate ${duplicate.name} (${duplicate.empNo}) · ${assetsToMove.length} asset(s) merged into kept record`
+        : `Removed duplicate ${duplicate.name} (${duplicate.empNo})`,
+    );
   }
 
   async function downloadZeroStockTonerReport() {
@@ -874,12 +930,15 @@ export default function Home() {
           {view === "Employees" && (
             <EmployeesView
               employees={filteredEmployees}
+              allEmployees={employees}
               assets={assets}
               department={department}
               setDepartment={setDepartment}
               departments={departments}
               onAdd={() => setModal("employee")}
               onEdit={(employee) => { setEditingEmployee(employee); setModal("employeeEdit"); }}
+              onDelete={deleteEmployee}
+              onMergeDuplicate={mergeDuplicateEmployee}
               onDocument={openDocument}
             />
           )}
@@ -969,10 +1028,11 @@ export default function Home() {
               }}
             />
           )}
-          {modal === "employee" && <EmployeeForm departments={departments} onSave={async (employee) => { setEmployees((rows) => [employee, ...rows]); await saveRecord("employees", employee); setModal(null); flash("Employee added"); }} />}
+          {modal === "employee" && <EmployeeForm departments={departments} existingEmployees={employees} onSave={async (employee) => { setEmployees((rows) => [employee, ...rows]); await saveRecord("employees", employee); setModal(null); flash("Employee added"); }} />}
           {modal === "employeeEdit" && editingEmployee && (
             <EmployeeForm
               departments={departments}
+              existingEmployees={employees}
               initial={editingEmployee}
               onSave={async (employee) => {
                 setEmployees((rows) => rows.map((row) => row.id === employee.id ? employee : row));
@@ -1694,18 +1754,160 @@ function AssetsView({
   );
 }
 
-function EmployeesView({ employees, assets, department, setDepartment, departments, onAdd, onEdit, onDocument }: { employees: Employee[]; assets: Asset[]; department: string; setDepartment: (value: string) => void; departments: string[]; onAdd: () => void; onEdit: (employee: Employee) => void; onDocument: (type: string, employeeId?: string, assetIds?: string[]) => void }) {
+function EmployeesView({
+  employees,
+  allEmployees,
+  assets,
+  department,
+  setDepartment,
+  departments,
+  onAdd,
+  onEdit,
+  onDelete,
+  onMergeDuplicate,
+  onDocument,
+}: {
+  employees: Employee[];
+  allEmployees: Employee[];
+  assets: Asset[];
+  department: string;
+  setDepartment: (value: string) => void;
+  departments: string[];
+  onAdd: () => void;
+  onEdit: (employee: Employee) => void;
+  onDelete: (employee: Employee) => void;
+  onMergeDuplicate: (keep: Employee, duplicate: Employee) => void;
+  onDocument: (type: string, employeeId?: string, assetIds?: string[]) => void;
+}) {
+  const duplicateGroups = useMemo(() => {
+    const byEmpNo = new Map<string, Employee[]>();
+    for (const emp of allEmployees) {
+      const normalizedNo = emp.empNo.trim().toLowerCase().replace(/^emp[-_\s]*/i, "").replace(/^0+(?=\d)/, "");
+      const key = normalizedNo ? `empno:${normalizedNo}` : `name:${emp.name.trim().toLowerCase()}|${emp.department.trim().toLowerCase()}`;
+      const list = byEmpNo.get(key) ?? [];
+      list.push(emp);
+      byEmpNo.set(key, list);
+    }
+    return Array.from(byEmpNo.values())
+      .filter((group) => group.length > 1)
+      .map((group) => {
+        const sorted = [...group].sort((a, b) => {
+          const aCount = assets.filter((asset) => asset.employeeId === a.id).length;
+          const bCount = assets.filter((asset) => asset.employeeId === b.id).length;
+          if (bCount !== aCount) return bCount - aCount;
+          if (a.status === "Active" && b.status !== "Active") return -1;
+          if (b.status === "Active" && a.status !== "Active") return 1;
+          return a.id.localeCompare(b.id);
+        });
+        return sorted;
+      });
+  }, [allEmployees, assets]);
+
+  const duplicateEmployeeIds = useMemo(
+    () => new Set(duplicateGroups.flat().map((emp) => emp.id)),
+    [duplicateGroups],
+  );
+
   return (
     <>
       <PageHead eyebrow="PEOPLE" title="Employees" description="See every employee and the full set of assets under their responsibility.">
         <button className="button button-secondary" onClick={() => onDocument("Employee Asset Summary")}><Printer size={17} />Print summary</button>
         <button className="button button-primary" onClick={onAdd}><Plus size={17} />Add employee</button>
       </PageHead>
-      <div className="select-row"><label>Department<select value={department} onChange={(event) => setDepartment(event.target.value)}><option>All</option>{departments.map((item) => <option key={item}>{item}</option>)}</select></label><span>{employees.length} active employees</span></div>
+
+      {duplicateGroups.length > 0 && (
+        <section className="duplicate-employees-banner" role="alert">
+          <div className="duplicate-banner-head">
+            <AlertTriangle size={20} />
+            <div>
+              <strong>Duplicate employees detected ({duplicateGroups.length} duplicate Emp No{duplicateGroups.length === 1 ? "" : "s"})</strong>
+              <span>Keep one primary record and safely merge any assigned assets &amp; history before removing the duplicate.</span>
+            </div>
+          </div>
+          <div className="duplicate-groups-list">
+            {duplicateGroups.map((group) => {
+              const primary = group[0];
+              const duplicates = group.slice(1);
+              return (
+                <div className="duplicate-group-row" key={group.map((g) => g.id).join("-")}>
+                  <div className="duplicate-group-meta">
+                    <div>
+                      <strong>{primary.name} · Emp No {primary.empNo} ({primary.department})</strong>
+                      <div><small>{group.length} matching records found</small></div>
+                    </div>
+                    <button
+                      type="button"
+                      className="button button-orange button-sm"
+                      onClick={() => onMergeDuplicate(primary, duplicates[0])}
+                    >
+                      <Trash2 size={14} />Keep &amp; remove duplicate
+                    </button>
+                  </div>
+                  <div className="duplicate-records-grid">
+                    {group.map((entry, idx) => {
+                      const entryOwned = assets.filter((asset) => asset.employeeId === entry.id).length;
+                      return (
+                        <div className="duplicate-record-chip" key={entry.id}>
+                          <div>
+                            <strong>{entry.name} {idx === 0 ? "(Primary)" : "(Duplicate)"}</strong>
+                            <small>{entry.empNo} · {entry.department} · {entry.email || "No email"} · {entryOwned} asset{entryOwned === 1 ? "" : "s"}</small>
+                          </div>
+                          {idx > 0 && (
+                            <button
+                              type="button"
+                              className="button button-secondary button-sm"
+                              onClick={() => onMergeDuplicate(primary, entry)}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <div className="select-row"><label>Department<select value={department} onChange={(event) => setDepartment(event.target.value)}><option>All</option>{departments.map((item) => <option key={item}>{item}</option>)}</select></label><span>{employees.length} employee{employees.length === 1 ? "" : "s"} shown</span></div>
       <div className="employee-grid">
         {employees.map((employee) => {
           const owned = assets.filter((asset) => asset.employeeId === employee.id);
-          return <article className="employee-card" key={employee.id}><div className="employee-head"><span className="avatar">{initials(employee.name)}</span><span className={statusClass(employee.status)}>{employee.status}</span></div><h3>{employee.name}</h3><p>{employee.designation}</p><small>{employee.empNo} · {employee.department}</small><div className="asset-chip-row">{owned.length ? owned.slice(0, 3).map((asset) => <span key={asset.id}>{asset.type}</span>) : <em>No assets assigned</em>}{owned.length > 3 && <span>+{owned.length - 3}</span>}</div><div className="employee-foot"><strong>{owned.length} asset{owned.length !== 1 ? "s" : ""}</strong><div><button onClick={() => onEdit(employee)}><Pencil size={13} /> Edit</button><button onClick={() => onDocument("Asset Handover", employee.id, owned.map((asset) => asset.id))}>Document →</button></div></div></article>;
+          const isDuplicate = duplicateEmployeeIds.has(employee.id);
+          return (
+            <article className={isDuplicate ? "employee-card employee-card-duplicate" : "employee-card"} key={employee.id}>
+              <div className="employee-head">
+                <span className="avatar">{initials(employee.name)}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  {isDuplicate && <span className="duplicate-pill"><AlertTriangle size={11} />Duplicate</span>}
+                  <span className={statusClass(employee.status)}>{employee.status}</span>
+                </div>
+              </div>
+              <h3>{employee.name}</h3>
+              <p>{employee.designation}</p>
+              <small>{employee.empNo} · {employee.department}</small>
+              <div className="asset-chip-row">{owned.length ? owned.slice(0, 3).map((asset) => <span key={asset.id}>{asset.type}</span>) : <em>No assets assigned</em>}{owned.length > 3 && <span>+{owned.length - 3}</span>}</div>
+              <div className="employee-foot">
+                <strong>{owned.length} asset{owned.length !== 1 ? "s" : ""}</strong>
+                <div>
+                  <button type="button" onClick={() => onEdit(employee)}><Pencil size={13} /> Edit</button>
+                  <button
+                    type="button"
+                    className="employee-delete-btn"
+                    disabled={owned.length > 0}
+                    title={owned.length > 0 ? "Return assigned assets or use Merge Duplicate above first" : "Remove employee"}
+                    onClick={() => onDelete(employee)}
+                  >
+                    <Trash2 size={13} /> Delete
+                  </button>
+                  <button type="button" onClick={() => onDocument("Asset Handover", employee.id, owned.map((asset) => asset.id))}>Document →</button>
+                </div>
+              </div>
+            </article>
+          );
         })}
       </div>
     </>
@@ -2730,10 +2932,84 @@ function AssetForm({
   );
 }
 
-function EmployeeForm({ departments, onSave, initial }: { departments: string[]; onSave: (employee: Employee) => void; initial?: Employee }) {
-  const [form, setForm] = useState({ name: initial?.name ?? "", empNo: initial?.empNo ?? "", email: initial?.email ?? "", department: initial?.department ?? departments[0] ?? "", designation: initial?.designation ?? "", status: initial?.status ?? "Active" });
-  const field = (key: keyof typeof form) => ({ value: form[key], onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm({ ...form, [key]: event.target.value }) });
-  return <form className="form-grid" onSubmit={(event) => { event.preventDefault(); onSave({ id: initial?.id ?? crypto.randomUUID(), ...form, status: form.status as Employee["status"] }); }}><label className="full">Full name<input required placeholder="Employee full name" {...field("name")} /></label><label>Employee number<input required placeholder="EMP-0001" {...field("empNo")} /></label><label>Email<input required type="email" placeholder="name@company.lk" {...field("email")} /></label><label>Department<select {...field("department")}>{departments.map((item) => <option key={item}>{item}</option>)}</select></label><label>Designation<input required placeholder="Job title" {...field("designation")} /></label><label>Employment status<select {...field("status")}><option>Active</option><option>Resigned</option></select></label><FormActions text={initial ? "Update employee" : "Add employee"} /></form>;
+function EmployeeForm({
+  departments,
+  existingEmployees,
+  onSave,
+  initial,
+}: {
+  departments: string[];
+  existingEmployees: Employee[];
+  onSave: (employee: Employee) => Promise<void> | void;
+  initial?: Employee;
+}) {
+  const [form, setForm] = useState({
+    name: initial?.name ?? "",
+    empNo: initial?.empNo ?? "",
+    email: initial?.email ?? "",
+    department: initial?.department ?? departments[0] ?? "",
+    designation: initial?.designation ?? "",
+    status: initial?.status ?? "Active",
+  });
+  const [submitting, setSubmitting] = useState(false);
+
+  const normalizeEmpNo = (val: string) => val.trim().toLowerCase().replace(/^emp[-_\s]*/i, "").replace(/^0+(?=\d)/, "");
+  const normalizedEmpNo = normalizeEmpNo(form.empNo);
+  const duplicateMatch = normalizedEmpNo
+    ? existingEmployees.find(
+        (emp) => emp.id !== initial?.id && normalizeEmpNo(emp.empNo) === normalizedEmpNo,
+      )
+    : undefined;
+
+  const field = (key: keyof typeof form) => ({
+    value: form[key],
+    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+      setForm({ ...form, [key]: event.target.value }),
+  });
+
+  return (
+    <form
+      className="form-grid"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        if (duplicateMatch || submitting) return;
+        setSubmitting(true);
+        try {
+          await onSave({
+            id: initial?.id ?? crypto.randomUUID(),
+            name: form.name.trim(),
+            empNo: form.empNo.trim(),
+            email: form.email.trim(),
+            department: form.department,
+            designation: form.designation.trim(),
+            status: form.status as Employee["status"],
+          });
+        } finally {
+          setSubmitting(false);
+        }
+      }}
+    >
+      {duplicateMatch && (
+        <div className="form-error-inline" role="alert">
+          <AlertTriangle size={15} />
+          <span>
+            Employee number <strong>{form.empNo.trim()}</strong> already exists ({duplicateMatch.name} · {duplicateMatch.department}). Edit the existing employee instead of creating a duplicate.
+          </span>
+        </div>
+      )}
+      <label className="full">Full name<input required placeholder="Employee full name" {...field("name")} /></label>
+      <label>Employee number<input required placeholder="EMP-0001" {...field("empNo")} /></label>
+      <label>Email<input required type="email" placeholder="name@company.lk" {...field("email")} /></label>
+      <label>Department<select {...field("department")}>{departments.map((item) => <option key={item}>{item}</option>)}</select></label>
+      <label>Designation<input required placeholder="Job title" {...field("designation")} /></label>
+      <label>Employment status<select {...field("status")}><option>Active</option><option>Resigned</option></select></label>
+      <div className="form-actions full">
+        <button className="button button-primary" type="submit" disabled={Boolean(duplicateMatch) || submitting}>
+          <Check size={17} />{submitting ? "Saving…" : initial ? "Update employee" : "Add employee"}
+        </button>
+      </div>
+    </form>
+  );
 }
 
 function AssignForm({

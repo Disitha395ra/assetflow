@@ -241,6 +241,47 @@ export async function removeRecord(name: string, id: string) {
   await deleteDoc(doc(db, name, id));
 }
 
+export async function mergeDuplicateEmployeeRecord(
+  keepEmployee: { id: string; name: string; department: string },
+  duplicateEmployeeId: string,
+  assetsToTransfer: { id: string; [key: string]: unknown }[],
+  movementsToTransfer: { id: string; [key: string]: unknown }[],
+) {
+  if (!db) return;
+  const CHUNK_SIZE = 350;
+  for (let i = 0; i < assetsToTransfer.length; i += CHUNK_SIZE) {
+    const batch = writeBatch(db);
+    for (const asset of assetsToTransfer.slice(i, i + CHUNK_SIZE)) {
+      batch.set(
+        doc(db, "assets", asset.id),
+        stripUndefined({
+          ...asset,
+          employeeId: keepEmployee.id,
+          custodianName: keepEmployee.name,
+          custodianDepartment: keepEmployee.department,
+        }),
+      );
+    }
+    await batch.commit();
+  }
+  for (let i = 0; i < movementsToTransfer.length; i += CHUNK_SIZE) {
+    const batch = writeBatch(db);
+    for (const movement of movementsToTransfer.slice(i, i + CHUNK_SIZE)) {
+      batch.set(
+        doc(db, "movements", movement.id),
+        stripUndefined({
+          ...movement,
+          employeeId: keepEmployee.id,
+          employeeName: keepEmployee.name,
+          department: keepEmployee.department,
+        }),
+      );
+    }
+    await batch.commit();
+  }
+  await deleteDoc(doc(db, "employees", duplicateEmployeeId));
+}
+
 export async function listRecords<T extends { id: string }>(name: string) {
   if (!db) return [];
   const snapshot = await getDocs(collection(db, name));

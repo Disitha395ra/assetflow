@@ -328,6 +328,23 @@ test("supports dropdown printer-toner mapping, toner replacement history, zero-b
   assert.match(css, /\.zero-stock-banner/);
 });
 
+test("detects duplicate employees, supports safe merge/delete, and prevents duplicate Emp No creation", async () => {
+  const [page, firebase, css] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(firebase, /mergeDuplicateEmployeeRecord/);
+  assert.match(page, /mergeDuplicateEmployeeRecord/);
+  assert.match(page, /Duplicate employees detected/);
+  assert.match(page, /Keep &amp; remove duplicate/);
+  assert.match(page, /already exists/);
+  assert.match(page, /deleteEmployee/);
+  assert.match(css, /\.duplicate-employees-banner/);
+  assert.match(css, /\.employee-delete-btn/);
+});
+
 
 
 
