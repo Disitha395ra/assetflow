@@ -158,7 +158,7 @@ export const MONITOR_SCREEN_SIZES = [
 
 export const ASSET_SPEC_FIELDS: Record<string, AssetSpecField[]> = {
   Laptop: [
-    { key: "ram", label: "RAM size", options: ["4 GB", "8 GB", "16 GB", "32 GB", "64 GB", "128 GB"] },
+    { key: "ram", label: "RAM size", options: ["4 GB", "8 GB", "16 GB", "20 GB", "32 GB", "64 GB", "128 GB"] },
     { key: "storageType", label: "Storage type", options: ["NVMe SSD", "SSD", "HDD", "SSD + HDD"] },
     { key: "storageSize", label: "Storage capacity", options: ["128 GB", "256 GB", "512 GB", "1 TB", "2 TB", "4 TB"] },
     { key: "processor", label: "Processor", placeholder: "e.g. Intel Core i5-1335U" },

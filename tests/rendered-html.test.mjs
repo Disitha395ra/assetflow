@@ -69,6 +69,7 @@ test("supports custom departments, employee editing and type-specific asset fiel
   assert.match(page, /Edit employee details/);
   assert.match(page, /Employee details updated/i);
   assert.match(catalog, /RAM size/);
+  assert.match(catalog, /"20 GB"/);
   assert.match(catalog, /Storage capacity/);
   assert.match(catalog, /Processor/);
   assert.match(catalog, /Wired USB/);
