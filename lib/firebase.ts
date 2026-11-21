@@ -282,20 +282,6 @@ export async function mergeDuplicateEmployeeRecord(
   await deleteDoc(doc(db, "employees", duplicateEmployeeId));
 }
 
-export async function bulkUpdateAssetWarranties(
-  updatedAssets: { id: string; [key: string]: unknown }[],
-) {
-  if (!db || !updatedAssets.length) return;
-  const CHUNK_SIZE = 400;
-  for (let i = 0; i < updatedAssets.length; i += CHUNK_SIZE) {
-    const batch = writeBatch(db);
-    for (const asset of updatedAssets.slice(i, i + CHUNK_SIZE)) {
-      batch.set(doc(db, "assets", asset.id), stripUndefined(asset));
-    }
-    await batch.commit();
-  }
-}
-
 export async function listRecords<T extends { id: string }>(name: string) {
   if (!db) return [];
   const snapshot = await getDocs(collection(db, name));

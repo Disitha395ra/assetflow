@@ -23,7 +23,6 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { firebaseReady, getRecord, watchCollection } from "@/lib/firebase";
 import { effectiveAssetStatus, formatSpecLabel, furnitureImageForAsset, isLocationOnlyAssetType } from "@/lib/catalog";
-import { getWarrantyStatus } from "@/lib/warranty";
 
 type PublicAsset = {
   id: string;
@@ -46,11 +45,6 @@ type PublicAsset = {
   custodianName?: string;
   custodianDepartment?: string;
   imageKey?: string;
-  warrantyStartDate?: string;
-  warrantyEndDate?: string;
-  warrantyVendor?: string;
-  warrantyInvoiceNo?: string;
-  warrantyProofUrl?: string;
 };
 
 type PublicMovement = {
@@ -121,19 +115,6 @@ export default function PublicAssetPage() {
               <label>Asset type<strong>{asset.type}</strong></label>
               <label>Condition<strong>{asset.condition}</strong></label>
               <label>Asset verified<strong>{asset.verified ? "Yes" : "No"}</strong></label>
-              {asset.category === "IT Asset" && (() => {
-                const w = getWarrantyStatus(asset);
-                return (
-                  <label>
-                    Warranty status
-                    <strong>
-                      <span className={w.badgeClass}>{w.label}</span>
-                      {asset.warrantyEndDate ? ` (${asset.warrantyStartDate ? `${asset.warrantyStartDate} → ` : "Ends "}${asset.warrantyEndDate})` : ""}
-                    </strong>
-                  </label>
-                );
-              })()}
-              {asset.warrantyVendor && <label>Warranty vendor<strong>{asset.warrantyVendor}</strong></label>}
               {Object.entries(asset.specs ?? {}).filter(([, value]) => value).map(([key, value]) => <label key={key}>{formatSpecLabel(key)}<strong>{value}</strong></label>)}
             </div>
             <div className="public-spec">{asset.details || "No additional specification recorded."}</div>

@@ -345,34 +345,18 @@ test("detects duplicate employees, supports safe merge/delete, and prevents dupl
   assert.match(css, /\.employee-delete-btn/);
 });
 
-test("supports IT asset warranty tracking, official portals, bulk batch updates, Excel import, and repair warranty alerts", async () => {
-  const [types, warranty, warrantyHub, page, publicAsset, excelReports, firebase] = await Promise.all([
-    readFile(new URL("../lib/types.ts", import.meta.url), "utf8"),
-    readFile(new URL("../lib/warranty.ts", import.meta.url), "utf8"),
+test("marks the Warranty Tracker section as under development", async () => {
+  const [warrantyHub, page, css] = await Promise.all([
     readFile(new URL("../components/WarrantyHubView.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/asset/[id]/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../lib/excelReports.ts", import.meta.url), "utf8"),
-    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
-  assert.match(types, /warrantyStartDate\?: string/);
-  assert.match(types, /warrantyEndDate\?: string/);
-  assert.match(types, /warrantyProofUrl\?: string/);
-  assert.match(warranty, /https:\/\/www\.asus\.com\/lk\/support\/warranty-status-inquiry\//);
-  assert.match(warranty, /https:\/\/pcsupport\.lenovo\.com\/us\/en\/warrantylookup\/batchquery/);
-  assert.match(warranty, /https:\/\/support\.hp\.com\/us-en\/check-warranty\/multiple-products/);
-  assert.match(warranty, /parseWarrantyImportRows/);
-  assert.match(warranty, /getWarrantyStatus/);
-  assert.match(warrantyHub, /Warranty Tracker &amp; Bulk Lookup/);
-  assert.match(warrantyHub, /Import Excel \/ Batch Results/);
-  assert.match(warrantyHub, /Set Warranty for \{selectedIds\.length\} Selected/);
+  assert.match(warrantyHub, /Under Development/);
+  assert.match(warrantyHub, /This feature is still under development/);
   assert.match(page, /WarrantyHubView/);
-  assert.match(page, /Warranty &amp; repair coverage/);
-  assert.match(page, /UNDER WARRANTY — Claim Manufacturer Warranty/);
-  assert.match(publicAsset, /getWarrantyStatus/);
-  assert.match(excelReports, /buildWarrantyStatusReport/);
-  assert.match(firebase, /bulkUpdateAssetWarranties/);
+  assert.match(page, /name: "Warranty" as View/);
+  assert.match(css, /\.under-dev-panel/);
 });
 
 

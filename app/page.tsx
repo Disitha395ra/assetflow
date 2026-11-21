@@ -53,7 +53,6 @@ import {
   ADMIN_EMAIL,
   DEFAULT_REQUIREMENT_WINDOW,
   applyTonerStockTransaction,
-  bulkUpdateAssetWarranties,
   commitAssetMovementsBatch,
   deleteAssetRecord,
   firebaseReady,
@@ -104,11 +103,9 @@ import {
   buildStaffLaptopsReport,
   buildStaffMonitorsReport,
   buildStaffMousesReport,
-  buildWarrantyStatusReport,
   buildZeroStockTonerRequisitionReport,
   downloadStyledWorkbook,
 } from "@/lib/excelReports";
-import { addYearsToDate, getWarrantyPortalForAsset, getWarrantyStatus } from "@/lib/warranty";
 import type {
   Asset,
   AssetAllocationType,
@@ -461,23 +458,6 @@ export default function Home() {
     flash(`Zero-stock toner requisition downloaded for Admin Dept`);
   }
 
-  async function downloadWarrantyReport(subset?: Asset[], scopeLabel?: string) {
-    const { sheets, filename } = buildWarrantyStatusReport(subset ?? assets, employeeMap, scopeLabel);
-    await downloadStyledWorkbook(sheets, filename);
-    flash(`${filename} downloaded`);
-  }
-
-  async function handleBulkUpdateWarranties(updatedAssets: Asset[], summary: string) {
-    if (!updatedAssets.length) return;
-    const byId = new Map(updatedAssets.map((a) => [a.id, a]));
-    setAssets((rows) => rows.map((row) => byId.get(row.id) ?? row));
-    if (selectedAsset && byId.has(selectedAsset.id)) {
-      setSelectedAsset(byId.get(selectedAsset.id) ?? null);
-    }
-    await bulkUpdateAssetWarranties(updatedAssets);
-    flash(summary);
-  }
-
   async function handleTonerStockAction(
     toner: TonerStock,
     mode: "Restock" | "Issued",
@@ -737,10 +717,7 @@ export default function Home() {
   const pendingRequirements = requests.filter((request) => request.status === "Pending").length;
   const lowStockToners = toners.filter((toner) => toner.quantity <= toner.minStock).length;
   const repairAssetsCount = assets.filter((asset) => effectiveAssetStatus(asset) === "In repair").length;
-  const expiringWarrantiesCount = assets.filter(
-    (asset) => asset.category === "IT Asset" && asset.status !== "Retired" && getWarrantyStatus(asset).state === "Expiring Soon",
-  ).length;
-  const totalAlerts = pendingRequirements + lowStockToners + repairAssetsCount + expiringWarrantiesCount;
+  const totalAlerts = pendingRequirements + lowStockToners + repairAssetsCount;
   const healthyAssets = assets.filter((asset) => {
     const st = effectiveAssetStatus(asset);
     return st !== "In repair" && st !== "Retired";
@@ -792,7 +769,7 @@ export default function Home() {
               <Icon size={19} />{name}
               {name === "Requirements" && pendingRequirements > 0 && <span className="nav-count">{pendingRequirements}</span>}
               {name === "Printers & Toners" && lowStockToners > 0 && <span className="nav-count">{lowStockToners}</span>}
-              {name === "Warranty" && expiringWarrantiesCount > 0 && <span className="nav-count">{expiringWarrantiesCount}</span>}
+              {name === "Warranty" && <span className="nav-dev-tag">Dev</span>}
             </button>
           ))}
           <p className="nav-label second">MANAGEMENT</p>
@@ -957,12 +934,12 @@ export default function Home() {
           )}
           {view === "Warranty" && (
             <WarrantyHubView
-              assets={filteredAssets}
-              employeeMap={employeeMap}
-              onAsset={setSelectedAsset}
-              onBulkUpdateWarranties={handleBulkUpdateWarranties}
-              onDownloadWarrantyReport={downloadWarrantyReport}
-              onFlash={flash}
+              onBackToDashboard={() => setView("Dashboard")}
+              onViewAssets={() => {
+                setCategory("IT Asset");
+                setAssetTypeFilter("All");
+                setView("Assets");
+              }}
             />
           )}
           {view === "Employees" && (
@@ -997,7 +974,6 @@ export default function Home() {
               onExport={exportWorkbook}
               onDocument={openDocument}
               onDownloadZeroStockReport={downloadZeroStockTonerReport}
-              onDownloadWarrantyReport={() => downloadWarrantyReport()}
               onDownloadStructuredReport={async (reportId) => {
                 const reportMap = {
                   laptops: () => buildStaffLaptopsReport(assets, employeeMap),
@@ -2004,7 +1980,6 @@ function ReportsView({
   onExport,
   onDocument,
   onDownloadZeroStockReport,
-  onDownloadWarrantyReport,
   onDownloadStructuredReport,
 }: {
   assets: Asset[];
@@ -2016,7 +1991,6 @@ function ReportsView({
   onExport: () => void;
   onDocument: (type: string) => void;
   onDownloadZeroStockReport: () => void;
-  onDownloadWarrantyReport: () => void;
   onDownloadStructuredReport: (id: StructuredReportId) => Promise<void>;
 }) {
   const [downloading, setDownloading] = useState<string>("");
@@ -2115,9 +2089,6 @@ function ReportsView({
   return (
     <>
       <PageHead eyebrow="DOCUMENT CENTRE" title="Reports & documents" description="Download cleanly formatted Excel reports sorted A–Z by Department, or generate official PDF handover and clearance documents.">
-        <button className="button button-secondary" onClick={onDownloadWarrantyReport}>
-          <BadgeCheck size={16} />IT Warranty Report (Excel)
-        </button>
         <button className={zeroTonerCount > 0 ? "button button-orange" : "button button-secondary"} onClick={onDownloadZeroStockReport}>
           <AlertTriangle size={16} />0-Stock Toner Requisition ({zeroTonerCount})
         </button>
@@ -2277,16 +2248,6 @@ function AssetTable({ assets, employeeMap, onAsset, compact = false }: { assets:
                   <span className={statusClass(effectiveAssetStatus(asset))}>
                     {effectiveAssetStatus(asset)}
                   </span>
-                  {asset.category === "IT Asset" && asset.warrantyEndDate && (() => {
-                    const w = getWarrantyStatus(asset);
-                    return (
-                      <div style={{ marginTop: "4px" }}>
-                        <span className={w.badgeClass} title={w.detail}>
-                          {w.state === "Under Warranty" ? `Warranty · ${w.shortLabel}` : w.label}
-                        </span>
-                      </div>
-                    );
-                  })()}
                 </td>
                 <td><button className="row-action" aria-label={`View ${asset.name}`}>→</button></td>
               </tr>
@@ -2361,75 +2322,6 @@ function AssetDrawer({
               <p>{asset.brand} · {asset.model}</p>
             </div>
           </div>
-
-          {asset.category === "IT Asset" && (() => {
-            const warranty = getWarrantyStatus(asset);
-            const { portal, lookupUrl } = getWarrantyPortalForAsset(asset.brand, asset.model, asset.serial);
-            return (
-              <section className="detail-section">
-                <h3>Warranty &amp; repair coverage</h3>
-                <div className={`warranty-drawer-card tone-${warranty.tone}`}>
-                  <div className="warranty-drawer-top">
-                    <strong>
-                      {warranty.state === "Under Warranty"
-                        ? "Under Warranty — Eligible for Free Manufacturer Claim"
-                        : warranty.state === "Expiring Soon"
-                          ? "Warranty Expiring Soon — Claim Before Expiry"
-                          : warranty.state === "Expired"
-                            ? "Warranty Expired — Paid / Internal Repair Only"
-                            : "Warranty Dates Not Recorded Yet"}
-                    </strong>
-                    <span className={warranty.badgeClass}>{warranty.label}</span>
-                  </div>
-                  <div className="warranty-drawer-meta">
-                    <div>
-                      Start Date
-                      <strong>{asset.warrantyStartDate || "Not set"}</strong>
-                    </div>
-                    <div>
-                      End Date
-                      <strong>{asset.warrantyEndDate || "Not set"}</strong>
-                    </div>
-                    <div>
-                      Vendor / Supplier
-                      <strong>{asset.warrantyVendor || "—"}</strong>
-                    </div>
-                    <div>
-                      Invoice / PO Ref
-                      <strong>{asset.warrantyInvoiceNo || "—"}</strong>
-                    </div>
-                  </div>
-                  <div className="warranty-drawer-actions">
-                    <button
-                      type="button"
-                      className="button button-secondary button-sm"
-                      onClick={() => {
-                        if (asset.serial?.trim()) {
-                          navigator.clipboard?.writeText(asset.serial.trim()).catch(() => undefined);
-                        }
-                        window.open(lookupUrl, "_blank", "noopener,noreferrer");
-                      }}
-                    >
-                      <ExternalLink size={12} />Check on {portal?.brand || asset.brand || "Brand"} Site
-                    </button>
-                    {asset.warrantyProofUrl && (
-                      <a
-                        href={asset.warrantyProofUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="button button-secondary button-sm"
-                      >
-                        <ExternalLink size={12} />Open Proof
-                      </a>
-                    )}
-                    <button type="button" className="button button-primary button-sm" onClick={onEdit}>
-                      <Pencil size={12} />{asset.warrantyEndDate ? "Update warranty" : "Set warranty dates"}
-                    </button>
-                  </div>
-                </div>
-              </section>
-            );
-          })()}
           <section className="detail-section">
             <h3>Asset details</h3>
             <div className="detail-grid">
@@ -2584,11 +2476,6 @@ function AssetForm({
     verified: initial?.verified ? "Yes" : "No",
     details: initial?.details ?? "",
     imageKey: initial?.imageKey ?? "",
-    warrantyStartDate: initial?.warrantyStartDate ?? "",
-    warrantyEndDate: initial?.warrantyEndDate ?? "",
-    warrantyVendor: initial?.warrantyVendor ?? "",
-    warrantyInvoiceNo: initial?.warrantyInvoiceNo ?? "",
-    warrantyProofUrl: initial?.warrantyProofUrl ?? "",
   });
 
   const activeEmployees = employees.filter((employee) => employee.status === "Active");
@@ -2723,12 +2610,6 @@ function AssetForm({
           specs,
           status: nextStatus,
           updatedAt: today(),
-          warrantyStartDate: isNonIt ? undefined : (form.warrantyStartDate.trim() || undefined),
-          warrantyEndDate: isNonIt ? undefined : (form.warrantyEndDate.trim() || undefined),
-          warrantyVendor: isNonIt ? undefined : (form.warrantyVendor.trim() || undefined),
-          warrantyInvoiceNo: isNonIt ? undefined : (form.warrantyInvoiceNo.trim() || undefined),
-          warrantyProofUrl: isNonIt ? undefined : (form.warrantyProofUrl.trim() || undefined),
-          warrantyCheckedAt: !isNonIt && (form.warrantyStartDate || form.warrantyEndDate) ? today() : initial?.warrantyCheckedAt,
         });
       }}
     >
@@ -3060,60 +2941,6 @@ function AssetForm({
       })}
       <label>Condition<select {...field("condition")}><option>Excellent</option><option>Good</option><option>Fair</option><option>Repair</option></select></label>
       <label>Asset verified (Yes/No)<select {...field("verified")}><option value="No">No</option><option value="Yes">Yes</option></select></label>
-
-      {!isNonIt && (
-        <>
-          <div className="asset-spec-heading full">
-            <strong>Warranty &amp; proof details</strong>
-            <span>Record warranty start &amp; end dates so repair eligibility is visible at a glance.</span>
-          </div>
-          <label>
-            Warranty start date
-            <input type="date" {...field("warrantyStartDate")} />
-          </label>
-          <label>
-            Warranty end date
-            <input type="date" {...field("warrantyEndDate")} />
-          </label>
-          <div className="full warranty-quick-durations">
-            <span>Quick set warranty duration:</span>
-            {[
-              { label: "+1 Year", years: 1 },
-              { label: "+2 Years", years: 2 },
-              { label: "+3 Years", years: 3 },
-            ].map((preset) => (
-              <button
-                key={preset.label}
-                type="button"
-                className="button button-secondary button-sm"
-                onClick={() => {
-                  const base = form.warrantyStartDate || today();
-                  setForm({
-                    ...form,
-                    warrantyStartDate: base,
-                    warrantyEndDate: addYearsToDate(base, preset.years),
-                  });
-                }}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-          <label>
-            Warranty vendor / distributor
-            <input placeholder="e.g. ASUS Sri Lanka / Metropolitan / Singer" {...field("warrantyVendor")} />
-          </label>
-          <label>
-            Invoice / PO reference
-            <input placeholder="e.g. INV-2025-0412" {...field("warrantyInvoiceNo")} />
-          </label>
-          <label className="full">
-            Warranty proof URL (optional)
-            <input type="url" placeholder="https://... (official warranty check link or invoice Drive link)" {...field("warrantyProofUrl")} />
-          </label>
-        </>
-      )}
-
       <label className="full">Additional notes<textarea placeholder="Warranty, accessories or any other information…" {...field("details")} /></label>
       <FormActions text={initial ? "Update asset" : "Add asset"} />
     </form>
@@ -3505,46 +3332,8 @@ function RepairForm({ assets, onSave }: { assets: Asset[]; onSave: (assetId: str
   const [action, setAction] = useState<"start" | "complete">("start");
   const [note, setNote] = useState("");
   const selectedAsset = assets.find((asset) => asset.id === assetId);
-  const warrantyInfo = selectedAsset && selectedAsset.category === "IT Asset" ? getWarrantyStatus(selectedAsset) : null;
-  const portalMatch = selectedAsset ? getWarrantyPortalForAsset(selectedAsset.brand, selectedAsset.model, selectedAsset.serial) : null;
-
   return <form className="form-grid" onSubmit={(event) => { event.preventDefault(); if (assetId && note.trim()) onSave(assetId, action, note.trim()); }}>
     <label className="full">Asset<select value={assetId} onChange={(event) => { const nextId = event.target.value; setAssetId(nextId); setAction(assets.find((asset) => asset.id === nextId)?.status === "In repair" ? "complete" : "start"); }}>{repairable.map((asset) => <option key={asset.id} value={asset.id}>{asset.name} · {asset.code} · {asset.serial || asset.location || "No serial"}</option>)}</select></label>
-    {selectedAsset && warrantyInfo && (
-      <div className={`full repair-warranty-alert tone-${warrantyInfo.tone}`}>
-        <div>
-          <strong>
-            {warrantyInfo.state === "Under Warranty"
-              ? `UNDER WARRANTY — Claim Manufacturer Warranty (${warrantyInfo.label})`
-              : warrantyInfo.state === "Expiring Soon"
-                ? `WARRANTY EXPIRING SOON — ${warrantyInfo.label}`
-                : warrantyInfo.state === "Expired"
-                  ? `Warranty Expired (${selectedAsset.warrantyEndDate})`
-                  : "Warranty Dates Not Recorded"}
-          </strong>
-          <span>
-            {warrantyInfo.detail}
-            {selectedAsset.warrantyVendor ? ` · Vendor: ${selectedAsset.warrantyVendor}` : ""}
-            {selectedAsset.warrantyInvoiceNo ? ` · Inv: ${selectedAsset.warrantyInvoiceNo}` : ""}
-          </span>
-        </div>
-        {portalMatch && (
-          <a
-            href={portalMatch.lookupUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="button button-secondary button-sm"
-            onClick={() => {
-              if (selectedAsset.serial?.trim()) {
-                navigator.clipboard?.writeText(selectedAsset.serial.trim()).catch(() => undefined);
-              }
-            }}
-          >
-            <ExternalLink size={12} />Verify online
-          </a>
-        )}
-      </div>
-    )}
     <label className="full">Repair action<select value={action} onChange={(event) => setAction(event.target.value as "start" | "complete")}><option value="start">Send for repair</option><option value="complete">Mark repair completed</option></select></label>
     <label className="full">Repair details<textarea required minLength={5} placeholder="Fault, supplier, job reference, parts replaced or completion notes…" value={note} onChange={(event) => setNote(event.target.value)} /></label>
     {selectedAsset && <p className="full audit-badge">Current status: {selectedAsset.status} · Current condition: {selectedAsset.condition}</p>}
