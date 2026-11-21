@@ -2677,11 +2677,11 @@ function AssetForm({
             {spec.options ? (
               <select
                 required={spec.required !== false}
-                value={specs[spec.key] ?? ""}
+                value={spec.options.includes(specs[spec.key] ?? "") ? (specs[spec.key] ?? "") : ""}
                 onChange={(event) => setSpecs({ ...specs, [spec.key]: event.target.value })}
               >
                 <option value="">Select {spec.label.toLowerCase()}</option>
-                {spec.options.map((option) => <option key={option}>{option}</option>)}
+                {spec.options.map((option) => <option key={option} value={option}>{option}</option>)}
               </select>
             ) : isMappedTonerDropdown ? (
               <>

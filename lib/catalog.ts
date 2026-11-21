@@ -146,6 +146,16 @@ export type AssetSpecField = {
   required?: boolean;
 };
 
+export const MONITOR_SCREEN_SIZES = [
+  "19 inch",
+  "20 inch",
+  "21 inch",
+  "22 inch",
+  "24 inch",
+  "27 inch",
+  "32 inch",
+] as const;
+
 export const ASSET_SPEC_FIELDS: Record<string, AssetSpecField[]> = {
   Laptop: [
     { key: "ram", label: "RAM size", options: ["4 GB", "8 GB", "16 GB", "32 GB", "64 GB", "128 GB"] },
@@ -156,12 +166,12 @@ export const ASSET_SPEC_FIELDS: Record<string, AssetSpecField[]> = {
     { key: "eCores", label: "No. of E-Cores", options: ["0", "2", "4", "6", "8", "10", "12", "16", "N/A"] },
   ],
   Monitor: [
-    { key: "screenSize", label: "Screen size", options: ["19 inch", "21.5 inch", "22 inch", "24 inch", "27 inch", "32 inch", "Other"] },
+    { key: "screenSize", label: "Screen size", options: [...MONITOR_SCREEN_SIZES] },
     { key: "resolution", label: "Resolution", options: ["HD", "Full HD", "2K / QHD", "4K / UHD", "Other"] },
     { key: "connector", label: "Connection", options: ["HDMI", "DisplayPort", "USB-C", "VGA", "Multiple"] },
   ],
   "Classroom / Location Monitor": [
-    { key: "screenSize", label: "Screen size", options: ["24 inch", "27 inch", "32 inch", "43 inch", "50 inch", "55 inch", "65 inch", "75 inch", "85 inch", "Other"] },
+    { key: "screenSize", label: "Screen size", options: [...MONITOR_SCREEN_SIZES] },
     { key: "resolution", label: "Resolution", options: ["HD", "Full HD", "2K / QHD", "4K / UHD", "Other"] },
     { key: "connector", label: "Connection", options: ["HDMI", "DisplayPort", "USB-C", "VGA", "Multiple"] },
     { key: "mountType", label: "Mount / placement", options: ["Wall Mounted", "Desk Stand", "Ceiling Bracket", "Mobile Stand", "Podium"] },
