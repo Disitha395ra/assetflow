@@ -371,6 +371,54 @@ test("supports red Damage condition tag alongside Good, Excellent, Fair, and ora
   assert.match(css, /\.public-status-damage/);
 });
 
+test("adds styled Excel reports for Projectors, Chromecasts, and Mobile Phones plus resilient Firestore toner persistence", async () => {
+  const [firebase, page, excelReports] = await Promise.all([
+    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/excelReports.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(firebase, /watchFallbackTonerStore/);
+  assert.match(firebase, /saveTonerRecord/);
+  assert.match(firebase, /deleteTonerRecord/);
+  assert.match(firebase, /isPermissionDeniedError/);
+  assert.match(page, /watchFallbackTonerStore/);
+  assert.match(page, /saveTonerRecord/);
+  assert.match(page, /deleteTonerRecord/);
+  assert.match(page, /All Projectors/);
+  assert.match(page, /All Google Chromecasts/);
+  assert.match(page, /All Mobile Phones/);
+  assert.match(excelReports, /buildProjectorsReport/);
+  assert.match(excelReports, /buildChromecastsReport/);
+  assert.match(excelReports, /buildMobilePhonesReport/);
+});
+
+test("optimizes Firestore reads/writes with IndexedDB multi-tab cache, delta updates, chunked batch deletes, and pooled email service", async () => {
+  const [firebase, emailService, page, publicAsset, requirementPage] = await Promise.all([
+    readFile(new URL("../lib/firebase.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/emailService.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/asset/[id]/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/requirements/[slug]/page.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(firebase, /persistentLocalCache/);
+  assert.match(firebase, /persistentMultipleTabManager/);
+  assert.match(firebase, /export async function updateRecord/);
+  assert.match(firebase, /export function watchRecord/);
+  assert.match(firebase, /export async function deleteRecordsBatch/);
+  assert.match(firebase, /batch\.update\(/);
+  assert.match(emailService, /pool: true/);
+  assert.match(emailService, /AbortSignal\.timeout/);
+  assert.match(emailService, /isValidEmail/);
+  assert.match(page, /assetsByEmployeeId/);
+  assert.match(page, /deleteRecordsBatch/);
+  assert.match(page, /updateRecord/);
+  assert.match(page, /markTonerCollectionRestricted/);
+  assert.match(publicAsset, /watchRecord<PublicAsset>/);
+  assert.match(requirementPage, /setSubmitError/);
+});
+
 
 
 

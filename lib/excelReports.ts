@@ -1190,3 +1190,298 @@ export function buildZeroStockTonerRequisitionReport(
     filename: `AssetFlow-Zero-Stock-Toner-Requisition-Admin-${isoDate()}.xlsx`,
   };
 }
+
+function splitBuildingAndRoom(location?: string): { building: string; room: string } {
+  const clean = (location || "").trim();
+  if (!clean || clean === "Central Stock") {
+    return { building: "Central Stock", room: "Central Stock" };
+  }
+  const sep = clean.indexOf(" - ");
+  if (sep > 0) {
+    return {
+      building: clean.slice(0, sep).trim(),
+      room: clean.slice(sep + 3).trim() || clean,
+    };
+  }
+  return { building: "Other Locations", room: clean };
+}
+
+function sortLocationAssetsAZ(items: Asset[]): Asset[] {
+  return [...items].sort((a, b) => {
+    const locA = (a.location || "").trim();
+    const locB = (b.location || "").trim();
+    const isStockA = !locA || locA === "Central Stock";
+    const isStockB = !locB || locB === "Central Stock";
+    if (!isStockA && isStockB) return -1;
+    if (isStockA && !isStockB) return 1;
+    const locCmp = locA.localeCompare(locB, undefined, { sensitivity: "base" });
+    if (locCmp !== 0) return locCmp;
+    return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+  });
+}
+
+function buildLocationSummarySheet(
+  reportLabel: string,
+  items: Asset[],
+  generatedDate: string,
+): StyledSheet {
+  const byLoc = new Map<string, { building: string; room: string; allocated: number; available: number; repair: number; damage: number; verified: number; total: number }>();
+  for (const asset of items) {
+    const { building, room } = splitBuildingAndRoom(asset.location);
+    const key = `${building}|||${room}`;
+    const cur = byLoc.get(key) ?? { building, room, allocated: 0, available: 0, repair: 0, damage: 0, verified: 0, total: 0 };
+    const status = effectiveAssetStatus(asset);
+    cur.total += 1;
+    if (status === "Assigned") cur.allocated += 1;
+    else if (status === "Available") cur.available += 1;
+    else if (status === "In repair") cur.repair += 1;
+    else if (status === "Damage") cur.damage += 1;
+    if (asset.verified) cur.verified += 1;
+    byLoc.set(key, cur);
+  }
+
+  const sorted = Array.from(byLoc.values()).sort((a, b) => {
+    if (a.building === "Central Stock" && b.building !== "Central Stock") return 1;
+    if (a.building !== "Central Stock" && b.building === "Central Stock") return -1;
+    const bCmp = a.building.localeCompare(b.building, undefined, { sensitivity: "base" });
+    return bCmp !== 0 ? bCmp : a.room.localeCompare(b.room, undefined, { sensitivity: "base" });
+  });
+
+  const rows: StyledCell[][] = sorted.map((entry, idx) => [
+    { value: idx + 1, align: "center", isNumber: true },
+    { value: entry.building },
+    { value: entry.room },
+    { value: entry.allocated, align: "center", isNumber: true },
+    { value: entry.available, align: "center", isNumber: true },
+    { value: entry.repair, align: "center", tone: entry.repair > 0 ? "amber" : undefined, isNumber: true },
+    { value: entry.damage, align: "center", tone: entry.damage > 0 ? "red" : undefined, isNumber: true },
+    { value: entry.verified, align: "center", isNumber: true },
+    { value: entry.total, align: "center", isNumber: true },
+  ]);
+
+  return {
+    name: "Location Summary",
+    title: `ASSETFLOW — ${reportLabel.toUpperCase()} BY BUILDING & LOCATION`,
+    subtitle: `Generated on ${generatedDate} · Sorted A–Z by Building & Room · Total items: ${items.length}`,
+    columns: [
+      { header: "#", align: "center", minWidth: 6 },
+      { header: "Building", minWidth: 22 },
+      { header: "Classroom / Location", minWidth: 24 },
+      { header: "Allocated", align: "center", minWidth: 12 },
+      { header: "Available", align: "center", minWidth: 12 },
+      { header: "In Repair", align: "center", minWidth: 12 },
+      { header: "Damage", align: "center", minWidth: 11 },
+      { header: "Verified", align: "center", minWidth: 12 },
+      { header: "Total", align: "center", minWidth: 11 },
+    ],
+    rows,
+    footerRow: [
+      "",
+      "TOTAL",
+      `${sorted.length} location(s)`,
+      items.filter((a) => effectiveAssetStatus(a) === "Assigned").length,
+      items.filter((a) => effectiveAssetStatus(a) === "Available").length,
+      items.filter((a) => effectiveAssetStatus(a) === "In repair").length,
+      items.filter((a) => effectiveAssetStatus(a) === "Damage").length,
+      items.filter((a) => a.verified).length,
+      items.length,
+    ],
+  };
+}
+
+// ============================================================
+// REPORT 7: ALL PROJECTORS
+// ============================================================
+export function buildProjectorsReport(
+  assets: Asset[],
+): { sheets: StyledSheet[]; filename: string } {
+  const generated = formattedDateLabel();
+  const projectors = sortLocationAssetsAZ(assets.filter((a) => a.type === "Projector"));
+
+  const rows: StyledCell[][] = projectors.map((asset, idx) => {
+    const { building, room } = splitBuildingAndRoom(asset.location);
+    const status = effectiveAssetStatus(asset);
+    return [
+      { value: idx + 1, align: "center", isNumber: true },
+      { value: building },
+      { value: room },
+      { value: asset.code, align: "center" },
+      { value: asset.name },
+      { value: asset.brand || "—" },
+      { value: asset.model || "—" },
+      { value: asset.serial || "—" },
+      { value: asset.specs?.mountType || "—", align: "center" },
+      { value: asset.specs?.connector || "—", align: "center" },
+      { value: asset.specs?.resolution || "—", align: "center" },
+      { value: asset.specs?.remoteIncluded || "—", align: "center" },
+      { value: status, align: "center", tone: statusTone(status) },
+      { value: asset.condition, align: "center", tone: statusTone(asset.condition) },
+      verifiedCell(asset.verified),
+      { value: asset.details || "—" },
+    ];
+  });
+
+  const mainSheet: StyledSheet = {
+    name: "All Projectors",
+    title: "ASSETFLOW — ALL PROJECTORS REPORT",
+    subtitle: `Generated on ${generated} · Sorted A–Z by Building & Classroom · Total Projectors: ${projectors.length} · Verified: ${projectors.filter((a) => a.verified).length}`,
+    columns: [
+      { header: "#", align: "center", minWidth: 6 },
+      { header: "Building", minWidth: 20 },
+      { header: "Classroom / Location", minWidth: 22 },
+      { header: "Asset Code", align: "center", minWidth: 14 },
+      { header: "Asset Name", minWidth: 24 },
+      { header: "Brand", minWidth: 14 },
+      { header: "Model", minWidth: 18 },
+      { header: "Serial Number", minWidth: 18 },
+      { header: "Mount / Placement", align: "center", minWidth: 18 },
+      { header: "Input Connection", align: "center", minWidth: 16 },
+      { header: "Resolution", align: "center", minWidth: 14 },
+      { header: "Remote Included", align: "center", minWidth: 15 },
+      { header: "Status", align: "center", minWidth: 12 },
+      { header: "Condition", align: "center", minWidth: 12 },
+      { header: "Asset Verified (Yes/No)", align: "center", minWidth: 20 },
+      { header: "Additional Notes", minWidth: 24 },
+    ],
+    rows,
+    footerRow: ["", "", `Total Projectors: ${projectors.length}`, "", "", "", "", "", "", "", "", "", "", "", `Verified: ${projectors.filter((a) => a.verified).length}/${projectors.length}`, ""],
+  };
+
+  return {
+    sheets: [mainSheet, buildLocationSummarySheet("Projectors", projectors, generated)],
+    filename: `AssetFlow-Report-7-Projectors-${isoDate()}.xlsx`,
+  };
+}
+
+// ============================================================
+// REPORT 8: ALL GOOGLE CHROMECASTS
+// ============================================================
+export function buildChromecastsReport(
+  assets: Asset[],
+): { sheets: StyledSheet[]; filename: string } {
+  const generated = formattedDateLabel();
+  const chromecasts = sortLocationAssetsAZ(assets.filter((a) => a.type === "Google Chromecast"));
+
+  const rows: StyledCell[][] = chromecasts.map((asset, idx) => {
+    const { building, room } = splitBuildingAndRoom(asset.location);
+    const status = effectiveAssetStatus(asset);
+    return [
+      { value: idx + 1, align: "center", isNumber: true },
+      { value: building },
+      { value: room },
+      { value: asset.code, align: "center" },
+      { value: asset.name },
+      { value: asset.brand || "Google" },
+      { value: asset.model || "—" },
+      { value: asset.serial || "—" },
+      { value: asset.specs?.generation || "—" },
+      { value: asset.specs?.resolution || "—", align: "center" },
+      { value: asset.specs?.connectivity || "—", align: "center" },
+      { value: asset.specs?.remoteIncluded || "—", align: "center" },
+      { value: status, align: "center", tone: statusTone(status) },
+      { value: asset.condition, align: "center", tone: statusTone(asset.condition) },
+      verifiedCell(asset.verified),
+      { value: asset.details || "—" },
+    ];
+  });
+
+  const mainSheet: StyledSheet = {
+    name: "All Google Chromecasts",
+    title: "ASSETFLOW — ALL GOOGLE CHROMECASTS REPORT",
+    subtitle: `Generated on ${generated} · Sorted A–Z by Building & Classroom · Total Chromecasts: ${chromecasts.length} · Verified: ${chromecasts.filter((a) => a.verified).length}`,
+    columns: [
+      { header: "#", align: "center", minWidth: 6 },
+      { header: "Building", minWidth: 20 },
+      { header: "Classroom / Location", minWidth: 22 },
+      { header: "Asset Code", align: "center", minWidth: 14 },
+      { header: "Asset Name", minWidth: 24 },
+      { header: "Brand", minWidth: 12 },
+      { header: "Model", minWidth: 20 },
+      { header: "Serial Number", minWidth: 18 },
+      { header: "Chromecast Generation", minWidth: 24 },
+      { header: "Max Resolution", align: "center", minWidth: 16 },
+      { header: "Connectivity", align: "center", minWidth: 18 },
+      { header: "Remote Included", align: "center", minWidth: 16 },
+      { header: "Status", align: "center", minWidth: 12 },
+      { header: "Condition", align: "center", minWidth: 12 },
+      { header: "Asset Verified (Yes/No)", align: "center", minWidth: 20 },
+      { header: "Additional Notes", minWidth: 24 },
+    ],
+    rows,
+    footerRow: ["", "", `Total Chromecasts: ${chromecasts.length}`, "", "", "", "", "", "", "", "", "", "", "", `Verified: ${chromecasts.filter((a) => a.verified).length}/${chromecasts.length}`, ""],
+  };
+
+  return {
+    sheets: [mainSheet, buildLocationSummarySheet("Google Chromecasts", chromecasts, generated)],
+    filename: `AssetFlow-Report-8-Google-Chromecasts-${isoDate()}.xlsx`,
+  };
+}
+
+// ============================================================
+// REPORT 9: ALL MOBILE PHONES
+// ============================================================
+export function buildMobilePhonesReport(
+  assets: Asset[],
+  employeeMap: Record<string, Employee>,
+): { sheets: StyledSheet[]; filename: string } {
+  const generated = formattedDateLabel();
+  const phones = sortAssetsByDepartmentAZ(
+    assets.filter((a) => a.type === "Mobile Phone"),
+    employeeMap,
+  );
+
+  const rows: StyledCell[][] = phones.map((asset, idx) => {
+    const emp = asset.employeeId ? employeeMap[asset.employeeId] : undefined;
+    const dept = getDepartmentForSort(asset, employeeMap) || "Unassigned (Central Stock)";
+    const status = effectiveAssetStatus(asset);
+    return [
+      { value: idx + 1, align: "center", isNumber: true },
+      { value: emp?.empNo || "—", align: "center" },
+      { value: emp?.name || "Unassigned" },
+      { value: dept },
+      { value: asset.code, align: "center" },
+      { value: asset.name },
+      { value: asset.brand || "—" },
+      { value: asset.model || "—" },
+      { value: asset.serial || "—" },
+      { value: asset.specs?.imei || "—", align: "center" },
+      { value: asset.specs?.ram || "—", align: "center" },
+      { value: asset.specs?.storageSize || "—", align: "center" },
+      { value: status, align: "center", tone: statusTone(status) },
+      { value: asset.condition, align: "center", tone: statusTone(asset.condition) },
+      verifiedCell(asset.verified),
+      { value: asset.details || "—" },
+    ];
+  });
+
+  const mainSheet: StyledSheet = {
+    name: "All Mobile Phones",
+    title: "ASSETFLOW — ALL MOBILE PHONES REPORT",
+    subtitle: `Generated on ${generated} · Sorted A–Z by Department · Total Mobile Phones: ${phones.length} · Verified: ${phones.filter((a) => a.verified).length}`,
+    columns: [
+      { header: "#", align: "center", minWidth: 6 },
+      { header: "Emp No", align: "center", minWidth: 12 },
+      { header: "Name", minWidth: 22 },
+      { header: "Department", minWidth: 22 },
+      { header: "Asset Code", align: "center", minWidth: 14 },
+      { header: "Asset Name", minWidth: 24 },
+      { header: "Brand", minWidth: 12 },
+      { header: "Model", minWidth: 20 },
+      { header: "Serial Number", minWidth: 18 },
+      { header: "IMEI Number", align: "center", minWidth: 18 },
+      { header: "RAM", align: "center", minWidth: 10 },
+      { header: "Storage", align: "center", minWidth: 12 },
+      { header: "Status", align: "center", minWidth: 12 },
+      { header: "Condition", align: "center", minWidth: 12 },
+      { header: "Asset Verified (Yes/No)", align: "center", minWidth: 20 },
+      { header: "Additional Notes", minWidth: 24 },
+    ],
+    rows,
+    footerRow: ["", "", `Total Mobile Phones: ${phones.length}`, "", "", "", "", "", "", "", "", "", "", "", `Verified: ${phones.filter((a) => a.verified).length}/${phones.length}`, ""],
+  };
+
+  return {
+    sheets: [mainSheet, buildDepartmentSummarySheet("Mobile Phones", phones, employeeMap, generated)],
+    filename: `AssetFlow-Report-9-Mobile-Phones-${isoDate()}.xlsx`,
+  };
+}

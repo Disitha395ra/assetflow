@@ -651,25 +651,33 @@ export function TonerForm({
     storageLocation: initial?.storageLocation ?? "Central IT Store",
     notes: initial?.notes ?? "",
   });
+  const [submitting, setSubmitting] = useState(false);
 
   return (
     <form
       className="form-grid"
-      onSubmit={(event) => {
+      onSubmit={async (event) => {
         event.preventDefault();
+        if (submitting) return;
         const resolvedModel = modelSelect === "__custom__" ? form.printerModel.trim() : modelSelect.trim();
-        onSave({
-          id: initial?.id ?? crypto.randomUUID(),
-          printerModel: resolvedModel,
-          printerBrand: form.printerBrand.trim(),
-          tonerModel: form.tonerModel.trim(),
-          color: form.color,
-          quantity: Math.floor(Math.max(0, Number(form.quantity) || 0)),
-          minStock: Math.floor(Math.max(0, Number(form.minStock) || 0)),
-          storageLocation: form.storageLocation.trim() || "Central IT Store",
-          notes: form.notes.trim(),
-          updatedAt: new Date().toISOString().slice(0, 10),
-        });
+        if (!resolvedModel) return;
+        setSubmitting(true);
+        try {
+          await onSave({
+            id: initial?.id ?? crypto.randomUUID(),
+            printerModel: resolvedModel,
+            printerBrand: form.printerBrand.trim(),
+            tonerModel: form.tonerModel.trim(),
+            color: form.color,
+            quantity: Math.floor(Math.max(0, Number(form.quantity) || 0)),
+            minStock: Math.floor(Math.max(0, Number(form.minStock) || 0)),
+            storageLocation: form.storageLocation.trim() || "Central IT Store",
+            notes: form.notes.trim(),
+            updatedAt: new Date().toISOString().slice(0, 10),
+          });
+        } finally {
+          setSubmitting(false);
+        }
       }}
     >
       <label className={modelSelect === "__custom__" ? "" : "full"}>
@@ -790,8 +798,8 @@ export function TonerForm({
 
       <div className="form-actions full">
         <p>Toner SKUs automatically link with printers matching this printer model.</p>
-        <button className="button button-primary" type="submit">
-          <Check size={17} />{initial ? "Update toner SKU" : "Save toner SKU"}
+        <button className="button button-primary" type="submit" disabled={submitting}>
+          <Check size={17} />{submitting ? "Saving…" : initial ? "Update toner SKU" : "Save toner SKU"}
         </button>
       </div>
     </form>

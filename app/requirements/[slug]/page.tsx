@@ -13,7 +13,6 @@ import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   firebaseReady,
-  getRequirementWindow,
   saveRecord,
   watchRequirementWindow,
   type RequirementWindowRecord,
@@ -27,6 +26,7 @@ export default function PublicRequirementForm() {
   const [loading, setLoading] = useState(true);
   const [submitted, setSubmitted] = useState(false);
   const [sending, setSending] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [currentTime] = useState(Date.now);
   const [form, setForm] = useState({
     requesterName: "", requesterEmail: "", department: DEFAULT_DEPARTMENTS[0],
@@ -44,9 +44,6 @@ export default function PublicRequirementForm() {
       }
       setLoading(false);
     };
-    getRequirementWindow().then((config) => {
-      applyConfig(config);
-    });
     return watchRequirementWindow(applyConfig);
   }, []);
 
@@ -77,18 +74,31 @@ export default function PublicRequirementForm() {
       </section>
       <form className="requirement-public-form" onSubmit={async (event) => {
         event.preventDefault();
+        if (sending) return;
+        setSubmitError("");
         setSending(true);
-        const id = crypto.randomUUID();
-        await saveRecord("requirements", {
-          id,
-          ...form,
-          quantity: Number(form.quantity),
-          status: "Pending",
-          createdAt: new Date().toISOString(),
-        });
-        setSending(false);
-        setSubmitted(true);
+        try {
+          const id = crypto.randomUUID();
+          await saveRecord("requirements", {
+            id,
+            ...form,
+            requesterName: form.requesterName.trim(),
+            requesterEmail: form.requesterEmail.trim(),
+            item: form.item.trim(),
+            reason: form.reason.trim(),
+            quantity: Number(form.quantity),
+            status: "Pending",
+            createdAt: new Date().toISOString(),
+          });
+          setSubmitted(true);
+        } catch (err) {
+          console.error("Requirement submission failed:", err);
+          setSubmitError("Could not submit your requirement. Please verify the submission window is still open and try again.");
+        } finally {
+          setSending(false);
+        }
       }}>
+        {submitError && <div className="gate-error-banner" role="alert"><strong>Submission failed</strong>{submitError}</div>}
         <div className="requirement-section-title"><span>01</span><div><h2>Requestor details</h2><p>Who should IT contact about this requirement?</p></div></div>
         <div className="public-form-grid">
           <label>Your name<input required placeholder="Full name" {...field("requesterName")} /></label>

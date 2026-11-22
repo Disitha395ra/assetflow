@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { firebaseReady, getRecord, watchCollection } from "@/lib/firebase";
+import { firebaseReady, watchCollection, watchRecord } from "@/lib/firebase";
 import { conditionClassName, effectiveAssetStatus, formatSpecLabel, furnitureImageForAsset, isLocationOnlyAssetType } from "@/lib/catalog";
 
 type PublicAsset = {
@@ -66,11 +66,23 @@ export default function PublicAssetPage() {
 
   useEffect(() => {
     if (!firebaseReady || !id) return;
-    getRecord<PublicAsset>("assets", id).then((record) => {
-      setAsset(record);
-      setLoading(false);
-    });
-    return watchCollection<PublicMovement>(`assets/${id}/history`, setHistory);
+    const stopAsset = watchRecord<PublicAsset>(
+      "assets",
+      id,
+      (record) => {
+        setAsset(record);
+        setLoading(false);
+      },
+      () => {
+        setAsset(null);
+        setLoading(false);
+      },
+    );
+    const stopHistory = watchCollection<PublicMovement>(`assets/${id}/history`, setHistory);
+    return () => {
+      stopAsset();
+      stopHistory();
+    };
   }, [id]);
 
   if (!firebaseReady) return <PublicState title="Asset registry is being connected" copy="Please try this QR code again shortly." />;

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import nodemailer from "nodemailer";
+import { buildCcList, deliverTransactionalEmail, escapeHtml, isValidEmail } from "@/lib/emailService";
 
 type ReturnedAsset = {
   id: string;
@@ -25,18 +25,18 @@ type EmailRequestBody = {
   assets: ReturnedAsset[];
 };
 
-function escapeHtml(value: string | undefined | null) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
 export async function POST(req: Request) {
+  let body: EmailRequestBody;
   try {
-    const body: EmailRequestBody = await req.json();
+    body = (await req.json()) as EmailRequestBody;
+  } catch {
+    return NextResponse.json(
+      { success: false, error: "Invalid JSON request body." },
+      { status: 400 },
+    );
+  }
+
+  try {
     const {
       employeeName,
       employeeEmail,
@@ -48,35 +48,22 @@ export async function POST(req: Request) {
       assets = [],
     } = body;
 
-    if (!employeeEmail || !employeeEmail.includes("@")) {
+    if (!isValidEmail(employeeEmail)) {
       return NextResponse.json(
         { success: false, error: "A valid employee email address is required." },
         { status: 400 }
       );
     }
 
-    if (!assets.length) {
+    if (!Array.isArray(assets) || !assets.length || assets.length > 200) {
       return NextResponse.json(
-        { success: false, error: "At least one asset must be specified." },
+        { success: false, error: "Between 1 and 200 assets must be specified." },
         { status: 400 }
       );
     }
 
-    // Check for SMTP configuration
-    const smtpHost = process.env.SMTP_HOST;
-    const smtpPort = parseInt(process.env.SMTP_PORT || "587", 10);
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
-    const smtpFrom = process.env.SMTP_FROM || smtpUser || "AssetFlow <noreply@scot.lk>";
-    const resendApiKey = process.env.RESEND_API_KEY;
-    const defaultCc = ["admin@scot.lk", "it@scot.lk", "hr@scot.lk"];
-    const envCc = process.env.SMTP_CC
-      ? process.env.SMTP_CC.split(",").map((s) => s.trim()).filter(Boolean)
-      : [];
-    const allCc = Array.from(new Set([...defaultCc, ...envCc]));
-    const ccList = allCc.filter(
-      (c) => c.toLowerCase() !== employeeEmail.trim().toLowerCase()
-    );
+    // Standard CC list: admin@scot.lk, it@scot.lk, hr@scot.lk
+    const ccList = buildCcList(employeeEmail);
 
     // Asset rows HTML
     const assetRowsHtml = assets
@@ -107,13 +94,14 @@ export async function POST(req: Request) {
     const emailSubject = isClearance
       ? `Employee Clearance - Asset Return Confirmation (${assets.length} Item${assets.length > 1 ? "s" : ""})`
       : `Asset Return Confirmation - ${assets.length} Item${assets.length > 1 ? "s" : ""} Returned (${returnDate})`;
+    const safeSubject = escapeHtml(emailSubject);
 
     const emailHtml = `
       <!DOCTYPE html>
       <html>
       <head>
         <meta charset="utf-8">
-        <title>${emailSubject}</title>
+        <title>${safeSubject}</title>
       </head>
       <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f1f5f9; margin: 0; padding: 24px;">
         <table align="center" border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 680px; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);">
@@ -228,63 +216,20 @@ export async function POST(req: Request) {
       </html>
     `;
 
-    // 1. Try sending with Resend API if RESEND_API_KEY is present
-    if (resendApiKey) {
-      const resendRes = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${resendApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          from: smtpFrom.includes("<") ? smtpFrom : `AssetFlow <${smtpFrom}>`,
-          to: [employeeEmail],
-          ...(ccList.length ? { cc: ccList } : {}),
-          subject: emailSubject,
-          html: emailHtml,
-        }),
-      });
+    const delivery = await deliverTransactionalEmail({
+      to: employeeEmail,
+      subject: emailSubject,
+      html: emailHtml,
+    });
 
-      if (resendRes.ok) {
-        return NextResponse.json({
-          success: true,
-          provider: "resend",
-          message: `Return confirmation email successfully sent to ${employeeEmail}${ccList.length ? ` (CC: ${ccList.join(", ")})` : ""}`,
-        });
-      } else {
-        const errorText = await resendRes.text();
-        console.error("Resend API error:", errorText);
-      }
-    }
-
-    // 2. Try sending with SMTP if configured
-    if (smtpHost && smtpUser && smtpPass) {
-      const transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: smtpPort,
-        secure: smtpPort === 465,
-        auth: {
-          user: smtpUser,
-          pass: smtpPass,
-        },
-      });
-
-      await transporter.sendMail({
-        from: smtpFrom,
-        to: employeeEmail,
-        ...(ccList.length ? { cc: ccList } : {}),
-        subject: emailSubject,
-        html: emailHtml,
-      });
-
+    if (delivery.success) {
       return NextResponse.json({
         success: true,
-        provider: "smtp",
-        message: `Return confirmation email successfully sent to ${employeeEmail}${ccList.length ? ` (CC: ${ccList.join(", ")})` : ""}`,
+        provider: delivery.provider,
+        message: `Return confirmation email successfully sent to ${employeeEmail}${delivery.ccList.length ? ` (CC: ${delivery.ccList.join(", ")})` : ""}`,
       });
     }
 
-    // 3. Fallback: Neither Resend nor SMTP is configured
     console.warn(
       `[AssetFlow Email Simulation] Return email requested for ${employeeEmail} (CC: ${ccList.join(", ")}) with ${assets.length} assets, but neither SMTP nor RESEND_API_KEY is set in environment variables.`
     );

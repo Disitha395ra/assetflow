@@ -1,4 +1,4 @@
-import { getApps, initializeApp } from "firebase/app";
+import { getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import {
   getAuth,
   GoogleAuthProvider,
@@ -14,11 +14,16 @@ import {
   getDoc,
   getDocs,
   getFirestore,
+  initializeFirestore,
   onSnapshot,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   runTransaction,
   setDoc,
   Timestamp,
+  updateDoc,
   writeBatch,
+  type Firestore,
 } from "firebase/firestore";
 
 const getEnv = (val?: string, fallback: string = "") => (val && val.trim() ? val.trim() : fallback);
@@ -40,7 +45,23 @@ const app = firebaseReady
   ? getApps()[0] ?? initializeApp(firebaseConfig)
   : null;
 
-export const db = app ? getFirestore(app) : null;
+function createOptimizedFirestore(firebaseApp: FirebaseApp): Firestore {
+  if (typeof window !== "undefined") {
+    try {
+      return initializeFirestore(firebaseApp, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      });
+    } catch {
+      // Already initialized (e.g. Next.js fast refresh) or IndexedDB unavailable
+      return getFirestore(firebaseApp);
+    }
+  }
+  return getFirestore(firebaseApp);
+}
+
+export const db = app ? createOptimizedFirestore(app) : null;
 export const auth = app ? getAuth(app) : null;
 export const ADMIN_EMAIL = "it@scot.lk";
 export const ADMIN_EMAILS = [
@@ -106,6 +127,28 @@ export function watchCollection<T extends { id: string }>(
   );
 }
 
+export function watchRecord<T>(
+  name: string,
+  id: string,
+  callback: (row: T | null) => void,
+  onError?: (error: Error) => void,
+) {
+  if (!db) {
+    callback(null);
+    return () => undefined;
+  }
+  return onSnapshot(
+    doc(db, name, id),
+    (snapshot) => {
+      callback(snapshot.exists() ? (snapshot.data() as T) : null);
+    },
+    (error) => {
+      console.error(`Error watching "${name}/${id}":`, error);
+      onError?.(error);
+    },
+  );
+}
+
 function stripUndefined<T>(item: T): T {
   if (Array.isArray(item)) return item.map(stripUndefined) as T;
   if (item && typeof item === "object") {
@@ -124,6 +167,15 @@ export async function saveRecord<T extends { id: string }>(
 ) {
   if (!db) return;
   await setDoc(doc(db, name, value.id), stripUndefined(value));
+}
+
+export async function updateRecord(
+  name: string,
+  id: string,
+  patch: Record<string, unknown>,
+) {
+  if (!db) return;
+  await updateDoc(doc(db, name, id), stripUndefined(patch));
 }
 
 export async function commitAssetMovementsBatch(
@@ -166,17 +218,113 @@ export async function syncEmployeeCustodianOnAssets(
   for (let i = 0; i < assignedAssets.length; i += CHUNK_SIZE) {
     const batch = writeBatch(db);
     for (const asset of assignedAssets.slice(i, i + CHUNK_SIZE)) {
-      batch.set(
-        doc(db, "assets", asset.id),
-        stripUndefined({
-          ...asset,
-          custodianName: employee.name,
-          custodianDepartment: employee.department,
-        }),
-      );
+      batch.update(doc(db, "assets", asset.id), {
+        custodianName: employee.name,
+        custodianDepartment: employee.department,
+      });
     }
     await batch.commit();
   }
+}
+
+function isPermissionDeniedError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = "code" in error ? String((error as { code?: unknown }).code ?? "").toLowerCase() : "";
+  const message = "message" in error ? String((error as { message?: unknown }).message ?? "").toLowerCase() : "";
+  return code.includes("permission-denied") || message.includes("missing or insufficient permissions");
+}
+
+// Session-cached mode avoids repeating failing network round-trips when /toners rules are not yet deployed
+let tonerStorageMode: "unknown" | "collection" | "fallback" = "unknown";
+
+export function markTonerCollectionRestricted() {
+  tonerStorageMode = "fallback";
+}
+
+export function watchFallbackTonerStore<
+  TToner extends { id: string },
+  TTx extends { id: string },
+>(
+  onToners: (rows: TToner[]) => void,
+  onTransactions: (rows: TTx[]) => void,
+) {
+  if (!db) return () => undefined;
+  return onSnapshot(
+    doc(db, "settings", "departments"),
+    (snapshot) => {
+      if (!snapshot.exists()) {
+        onToners([]);
+        onTransactions([]);
+        return;
+      }
+      const data = snapshot.data();
+      const toners = Array.isArray(data.toners) ? (data.toners as TToner[]) : [];
+      const transactions = Array.isArray(data.tonerTransactions) ? (data.tonerTransactions as TTx[]) : [];
+      onToners(toners);
+      onTransactions(transactions);
+    },
+    (error) => {
+      console.error("Error loading fallback toner store:", error);
+    },
+  );
+}
+
+async function saveTonerToFallbackDoc<TToner extends { id: string }>(clean: TToner) {
+  if (!db) return;
+  const fallbackRef = doc(db, "settings", "departments");
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(fallbackRef);
+    const data = snap.exists() ? snap.data() : {};
+    const existing = Array.isArray(data.toners) ? (data.toners as TToner[]) : [];
+    const found = existing.some((row) => row.id === clean.id);
+    const next = found
+      ? existing.map((row) => (row.id === clean.id ? clean : row))
+      : [clean, ...existing];
+    tx.set(fallbackRef, { toners: next }, { merge: true });
+  });
+}
+
+export async function saveTonerRecord<TToner extends { id: string }>(toner: TToner) {
+  if (!db) return;
+  const clean = stripUndefined(toner);
+  if (tonerStorageMode === "fallback") {
+    await saveTonerToFallbackDoc(clean);
+    return;
+  }
+  try {
+    await setDoc(doc(db, "toners", toner.id), clean);
+    tonerStorageMode = "collection";
+  } catch (err) {
+    if (!isPermissionDeniedError(err)) throw err;
+    tonerStorageMode = "fallback";
+    await saveTonerToFallbackDoc(clean);
+  }
+}
+
+export async function deleteTonerRecord(tonerId: string) {
+  if (!db) return;
+  if (tonerStorageMode !== "fallback") {
+    try {
+      await deleteDoc(doc(db, "toners", tonerId));
+      tonerStorageMode = "collection";
+    } catch (err) {
+      if (!isPermissionDeniedError(err)) throw err;
+      tonerStorageMode = "fallback";
+    }
+  }
+  const fallbackRef = doc(db, "settings", "departments");
+  await runTransaction(db, async (tx) => {
+    const snap = await tx.get(fallbackRef);
+    if (!snap.exists()) return;
+    const data = snap.data();
+    const existing = Array.isArray(data.toners) ? (data.toners as { id: string }[]) : [];
+    if (!existing.some((row) => row.id === tonerId)) return;
+    tx.set(
+      fallbackRef,
+      { toners: existing.filter((row) => row.id !== tonerId) },
+      { merge: true },
+    );
+  });
 }
 
 export async function applyTonerStockTransaction<
@@ -203,42 +351,95 @@ export async function applyTonerStockTransaction<
     return { updatedToner, transaction, movement: printerMovement };
   }
 
-  return runTransaction(db, async (tx) => {
-    const tonerRef = doc(db, "toners", tonerFallback.id);
-    const snap = await tx.get(tonerRef);
-    const current = snap.exists() ? (snap.data() as TToner) : tonerFallback;
-    if (mode === "Issued" && safeQty > current.quantity) {
-      throw new Error(`Insufficient stock: only ${current.quantity} unit(s) remaining.`);
-    }
-    const nextQty = mode === "Restock"
-      ? current.quantity + safeQty
-      : Math.max(0, current.quantity - safeQty);
-    const updatedToner: TToner = { ...current, quantity: nextQty, updatedAt: tonerFallback.updatedAt };
-    const transaction = buildTransaction(nextQty);
-    tx.set(tonerRef, stripUndefined(updatedToner));
-    tx.set(doc(db, "tonerTransactions", transaction.id), stripUndefined(transaction));
-    if (printerMovement) {
-      tx.set(doc(db, "movements", printerMovement.id), stripUndefined(printerMovement));
-      tx.set(
-        doc(db, "assets", printerMovement.assetId, "history", printerMovement.id),
-        stripUndefined({
-          id: printerMovement.id,
-          type: printerMovement.type,
-          date: printerMovement.date,
-          createdAt: printerMovement.createdAt,
-          note: printerMovement.note,
-          employeeName: printerMovement.employeeName ?? "IT Administration",
-          department: printerMovement.department ?? "Central Stock",
-        }),
-      );
-    }
-    return { updatedToner, transaction, movement: printerMovement };
-  });
+  const writePrinterMovement = (tx: Parameters<Parameters<typeof runTransaction>[1]>[0]) => {
+    if (!printerMovement || !db) return;
+    tx.set(doc(db, "movements", printerMovement.id), stripUndefined(printerMovement));
+    tx.set(
+      doc(db, "assets", printerMovement.assetId, "history", printerMovement.id),
+      stripUndefined({
+        id: printerMovement.id,
+        type: printerMovement.type,
+        date: printerMovement.date,
+        createdAt: printerMovement.createdAt,
+        note: printerMovement.note,
+        employeeName: printerMovement.employeeName ?? "IT Administration",
+        department: printerMovement.department ?? "Central Stock",
+      }),
+    );
+  };
+
+  const runFallbackTx = async () => {
+    const fallbackRef = doc(db!, "settings", "departments");
+    return await runTransaction(db!, async (tx) => {
+      const snap = await tx.get(fallbackRef);
+      const data = snap.exists() ? snap.data() : {};
+      const existingToners = Array.isArray(data.toners) ? (data.toners as TToner[]) : [];
+      const existingLogs = Array.isArray(data.tonerTransactions) ? (data.tonerTransactions as TTx[]) : [];
+      const current = existingToners.find((row) => row.id === tonerFallback.id) ?? tonerFallback;
+      if (mode === "Issued" && safeQty > current.quantity) {
+        throw new Error(`Insufficient stock: only ${current.quantity} unit(s) remaining.`);
+      }
+      const nextQty = mode === "Restock"
+        ? current.quantity + safeQty
+        : Math.max(0, current.quantity - safeQty);
+      const updatedToner: TToner = stripUndefined({ ...current, quantity: nextQty, updatedAt: tonerFallback.updatedAt });
+      const transaction = stripUndefined(buildTransaction(nextQty));
+      const nextToners = existingToners.some((row) => row.id === tonerFallback.id)
+        ? existingToners.map((row) => (row.id === tonerFallback.id ? updatedToner : row))
+        : [updatedToner, ...existingToners];
+      const nextLogs = [transaction, ...existingLogs.filter((row) => row.id !== transaction.id)].slice(0, 500);
+      tx.set(fallbackRef, { toners: nextToners, tonerTransactions: nextLogs }, { merge: true });
+      writePrinterMovement(tx);
+      return { updatedToner, transaction, movement: printerMovement };
+    });
+  };
+
+  if (tonerStorageMode === "fallback") {
+    return runFallbackTx();
+  }
+
+  try {
+    const result = await runTransaction(db, async (tx) => {
+      const tonerRef = doc(db, "toners", tonerFallback.id);
+      const snap = await tx.get(tonerRef);
+      const current = snap.exists() ? (snap.data() as TToner) : tonerFallback;
+      if (mode === "Issued" && safeQty > current.quantity) {
+        throw new Error(`Insufficient stock: only ${current.quantity} unit(s) remaining.`);
+      }
+      const nextQty = mode === "Restock"
+        ? current.quantity + safeQty
+        : Math.max(0, current.quantity - safeQty);
+      const updatedToner: TToner = { ...current, quantity: nextQty, updatedAt: tonerFallback.updatedAt };
+      const transaction = buildTransaction(nextQty);
+      tx.set(tonerRef, stripUndefined(updatedToner));
+      tx.set(doc(db, "tonerTransactions", transaction.id), stripUndefined(transaction));
+      writePrinterMovement(tx);
+      return { updatedToner, transaction, movement: printerMovement };
+    });
+    tonerStorageMode = "collection";
+    return result;
+  } catch (err) {
+    if (!isPermissionDeniedError(err)) throw err;
+    tonerStorageMode = "fallback";
+    return runFallbackTx();
+  }
 }
 
 export async function removeRecord(name: string, id: string) {
   if (!db) return;
   await deleteDoc(doc(db, name, id));
+}
+
+export async function deleteRecordsBatch(paths: [string, string, ...string[]][]) {
+  if (!db || !paths.length) return;
+  const CHUNK_SIZE = 400;
+  for (let i = 0; i < paths.length; i += CHUNK_SIZE) {
+    const batch = writeBatch(db);
+    for (const [first, ...rest] of paths.slice(i, i + CHUNK_SIZE)) {
+      batch.delete(doc(db, first, ...rest));
+    }
+    await batch.commit();
+  }
 }
 
 export async function mergeDuplicateEmployeeRecord(
@@ -252,30 +453,22 @@ export async function mergeDuplicateEmployeeRecord(
   for (let i = 0; i < assetsToTransfer.length; i += CHUNK_SIZE) {
     const batch = writeBatch(db);
     for (const asset of assetsToTransfer.slice(i, i + CHUNK_SIZE)) {
-      batch.set(
-        doc(db, "assets", asset.id),
-        stripUndefined({
-          ...asset,
-          employeeId: keepEmployee.id,
-          custodianName: keepEmployee.name,
-          custodianDepartment: keepEmployee.department,
-        }),
-      );
+      batch.update(doc(db, "assets", asset.id), {
+        employeeId: keepEmployee.id,
+        custodianName: keepEmployee.name,
+        custodianDepartment: keepEmployee.department,
+      });
     }
     await batch.commit();
   }
   for (let i = 0; i < movementsToTransfer.length; i += CHUNK_SIZE) {
     const batch = writeBatch(db);
     for (const movement of movementsToTransfer.slice(i, i + CHUNK_SIZE)) {
-      batch.set(
-        doc(db, "movements", movement.id),
-        stripUndefined({
-          ...movement,
-          employeeId: keepEmployee.id,
-          employeeName: keepEmployee.name,
-          department: keepEmployee.department,
-        }),
-      );
+      batch.update(doc(db, "movements", movement.id), {
+        employeeId: keepEmployee.id,
+        employeeName: keepEmployee.name,
+        department: keepEmployee.department,
+      });
     }
     await batch.commit();
   }
@@ -290,16 +483,22 @@ export async function listRecords<T extends { id: string }>(name: string) {
 
 export async function deleteAssetRecord(assetId: string, movementIds: string[]) {
   if (!db) return;
-  if (movementIds.length > 249) {
-    throw new Error("This asset has too many lifecycle records to delete in one operation.");
+  // Chunk movement/history deletes (200 movements = 400 ops) so assets with large history never hit the 500-op batch cap
+  const CHUNK_SIZE = 200;
+  for (let i = 0; i < movementIds.length; i += CHUNK_SIZE) {
+    const batch = writeBatch(db);
+    for (const movementId of movementIds.slice(i, i + CHUNK_SIZE)) {
+      batch.delete(doc(db, "movements", movementId));
+      batch.delete(doc(db, "assets", assetId, "history", movementId));
+    }
+    if (i + CHUNK_SIZE >= movementIds.length) {
+      batch.delete(doc(db, "assets", assetId));
+    }
+    await batch.commit();
   }
-  const batch = writeBatch(db);
-  batch.delete(doc(db, "assets", assetId));
-  movementIds.forEach((movementId) => {
-    batch.delete(doc(db, "movements", movementId));
-    batch.delete(doc(db, "assets", assetId, "history", movementId));
-  });
-  await batch.commit();
+  if (!movementIds.length) {
+    await deleteDoc(doc(db, "assets", assetId));
+  }
 }
 
 export async function getRecord<T>(name: string, id: string) {
@@ -330,40 +529,44 @@ export const DEFAULT_REQUIREMENT_WINDOW: RequirementWindowRecord = {
   periodLabel: "Next planning period",
 };
 
+function cleanStringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
+    : [];
+}
+
+function toInputDate(value: unknown): string {
+  return value instanceof Timestamp
+    ? value.toDate().toISOString().slice(0, 16)
+    : String(value ?? "");
+}
+
 export async function getRequirementWindow() {
   if (!db) return DEFAULT_REQUIREMENT_WINDOW;
   const windowRef = doc(db, "settings", "requirement-window");
-  const legacyDepartmentsRef = doc(db, "settings", "departments");
-  const [snapshot, legacySnapshot] = await Promise.all([
-    getDoc(windowRef),
-    getDoc(legacyDepartmentsRef),
-  ]);
+  const snapshot = await getDoc(windowRef);
   if (!snapshot.exists()) return DEFAULT_REQUIREMENT_WINDOW;
   const data = snapshot.data();
-  const cleanDepartments = (value: unknown) =>
-    Array.isArray(value)
-      ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
-      : [];
-  const currentDepartments = cleanDepartments(data.departments);
-  const legacyDepartments = cleanDepartments(legacySnapshot.data()?.items);
-  const departments = currentDepartments.length ? currentDepartments : legacyDepartments;
-  const locations = cleanDepartments(data.locations);
+  const currentDepartments = cleanStringList(data.departments);
+  let departments = currentDepartments;
 
-  // Recheck inside the transaction so legacy data cannot overwrite a newer list.
-  if (!currentDepartments.length && legacyDepartments.length && isAdminEmail(auth?.currentUser?.email)) {
-    await runTransaction(db, async (transaction) => {
-      const latestSnapshot = await transaction.get(windowRef);
-      const latestDepartments = cleanDepartments(latestSnapshot.data()?.departments);
-      if (!latestDepartments.length) {
-        transaction.set(windowRef, { departments: legacyDepartments }, { merge: true });
-      }
-    });
+  // Only read legacy settings/departments when departments are not yet migrated (saves 1 GET on every load)
+  if (!currentDepartments.length) {
+    const legacySnapshot = await getDoc(doc(db, "settings", "departments"));
+    const legacyDepartments = cleanStringList(legacySnapshot.data()?.items);
+    departments = legacyDepartments;
+    if (legacyDepartments.length && isAdminEmail(auth?.currentUser?.email)) {
+      await runTransaction(db, async (transaction) => {
+        const latestSnapshot = await transaction.get(windowRef);
+        const latestDepartments = cleanStringList(latestSnapshot.data()?.departments);
+        if (!latestDepartments.length) {
+          transaction.set(windowRef, { departments: legacyDepartments }, { merge: true });
+        }
+      });
+    }
   }
 
-  const toInputDate = (value: unknown) =>
-    value instanceof Timestamp
-      ? value.toDate().toISOString().slice(0, 16)
-      : String(value ?? "");
+  const locations = cleanStringList(data.locations);
   return {
     ...data,
     id: "requirement-window",
@@ -385,16 +588,8 @@ export function watchRequirementWindow(callback: (value: RequirementWindowRecord
       return;
     }
     const data = snapshot.data();
-    const toInputDate = (value: unknown) =>
-      value instanceof Timestamp
-        ? value.toDate().toISOString().slice(0, 16)
-        : String(value ?? "");
-    const cleanList = (value: unknown) =>
-      Array.isArray(value)
-        ? value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
-        : [];
-    const departments = cleanList(data.departments);
-    const locations = cleanList(data.locations);
+    const departments = cleanStringList(data.departments);
+    const locations = cleanStringList(data.locations);
     callback({
       ...data,
       id: "requirement-window",

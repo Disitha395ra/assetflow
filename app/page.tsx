@@ -55,19 +55,25 @@ import {
   applyTonerStockTransaction,
   commitAssetMovementsBatch,
   deleteAssetRecord,
+  deleteRecordsBatch,
+  deleteTonerRecord,
   firebaseReady,
   getRequirementWindow,
   listRecords,
+  markTonerCollectionRestricted,
   mergeDuplicateEmployeeRecord,
   removeRecord,
   saveRecord,
   saveRequirementWindow,
+  saveTonerRecord,
   signInAsAdmin,
   signOutAdmin,
   syncEmployeeCustodianOnAssets,
+  updateRecord,
   isAdminEmail,
   watchAuth,
   watchCollection,
+  watchFallbackTonerStore,
   watchRequirementWindow,
   type RequirementWindowRecord,
 } from "@/lib/firebase";
@@ -98,8 +104,11 @@ import {
   tonerStockStatus,
 } from "@/components/PrintersTonersView";
 import {
+  buildChromecastsReport,
   buildEmployeeItAssetsReport,
+  buildMobilePhonesReport,
   buildPrinterAndTonerReport,
+  buildProjectorsReport,
   buildStaffHeadsetsReport,
   buildStaffLaptopsReport,
   buildStaffMonitorsReport,
@@ -168,8 +177,10 @@ export default function Home() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [movements, setMovements] = useState<Movement[]>([]);
   const [requests, setRequests] = useState<RequestRow[]>([]);
-  const [toners, setToners] = useState<TonerStock[]>([]);
-  const [tonerTransactions, setTonerTransactions] = useState<TonerTransaction[]>([]);
+  const [collectionToners, setCollectionToners] = useState<TonerStock[]>([]);
+  const [fallbackToners, setFallbackToners] = useState<TonerStock[]>([]);
+  const [collectionTonerTxs, setCollectionTonerTxs] = useState<TonerTransaction[]>([]);
+  const [fallbackTonerTxs, setFallbackTonerTxs] = useState<TonerTransaction[]>([]);
   const [departments, setDepartments] = useState<string[]>(DEFAULT_DEPARTMENTS);
   const [locations, setLocations] = useState<string[]>(DEFAULT_LOCATIONS);
   const [adminState, setAdminState] = useState<"loading" | "signed-out" | "admin" | "denied">(
@@ -233,9 +244,18 @@ export default function Home() {
         flash(`Firestore access restricted for "${colName}". Please verify firestore.rules are published.`);
       }
     };
+    let legacyChecked = false;
     const applyWindowConfig = (config: RequirementWindowRecord) => {
       setRequirementWindow(config);
-      if (config.departments?.length) setDepartments(config.departments);
+      if (config.departments?.length) {
+        setDepartments(config.departments);
+      } else if (!legacyChecked) {
+        legacyChecked = true;
+        // One-time lazy migration from legacy settings/departments only if departments not yet migrated
+        getRequirementWindow().then((migrated) => {
+          if (migrated.departments?.length) setDepartments(migrated.departments);
+        });
+      }
       if (config.locations?.length) setLocations(config.locations);
     };
     const cleanups = [
@@ -243,15 +263,33 @@ export default function Home() {
       watchCollection<Employee>("employees", setEmployees, handleCollectionError("employees")),
       watchCollection<Movement>("movements", setMovements, handleCollectionError("movements")),
       watchCollection<RequestRow>("requirements", setRequests, handleCollectionError("requirements")),
-      watchCollection<TonerStock>("toners", setToners, handleCollectionError("toners")),
-      watchCollection<TonerTransaction>("tonerTransactions", setTonerTransactions, handleCollectionError("tonerTransactions")),
+      watchCollection<TonerStock>("toners", setCollectionToners, (err) => {
+        markTonerCollectionRestricted();
+        console.warn("Primary toners collection unavailable; using Firestore settings fallback store:", err.message);
+      }),
+      watchCollection<TonerTransaction>("tonerTransactions", setCollectionTonerTxs, (err) => {
+        markTonerCollectionRestricted();
+        console.warn("Primary tonerTransactions collection unavailable; using Firestore settings fallback store:", err.message);
+      }),
+      watchFallbackTonerStore<TonerStock, TonerTransaction>(setFallbackToners, setFallbackTonerTxs),
       watchRequirementWindow(applyWindowConfig),
     ];
-    getRequirementWindow().then((config) => {
-      if (config) applyWindowConfig(config);
-    });
     return () => cleanups.forEach((cleanup) => cleanup());
   }, [adminState]);
+
+  const toners = useMemo(() => {
+    const map = new Map<string, TonerStock>();
+    for (const row of fallbackToners) map.set(row.id, row);
+    for (const row of collectionToners) map.set(row.id, row);
+    return Array.from(map.values());
+  }, [collectionToners, fallbackToners]);
+
+  const tonerTransactions = useMemo(() => {
+    const map = new Map<string, TonerTransaction>();
+    for (const row of fallbackTonerTxs) map.set(row.id, row);
+    for (const row of collectionTonerTxs) map.set(row.id, row);
+    return Array.from(map.values());
+  }, [collectionTonerTxs, fallbackTonerTxs]);
 
   const employeeMap = useMemo(
     () => Object.fromEntries(employees.map((item) => [item.id, item])),
@@ -261,6 +299,15 @@ export default function Home() {
     () => Object.fromEntries(assets.map((item) => [item.id, item])),
     [assets],
   );
+  const assetsByEmployeeId = useMemo(() => {
+    const grouped: Record<string, Asset[]> = {};
+    for (const asset of assets) {
+      if (asset.employeeId) {
+        (grouped[asset.employeeId] ??= []).push(asset);
+      }
+    }
+    return grouped;
+  }, [assets]);
 
   const sortedAssets = useMemo(
     () => [...assets].sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || "") || a.code.localeCompare(b.code)),
@@ -384,18 +431,38 @@ export default function Home() {
 
   async function saveToner(toner: TonerStock) {
     const exists = toners.some((row) => row.id === toner.id);
-    setToners((rows) => exists ? rows.map((row) => (row.id === toner.id ? toner : row)) : [toner, ...rows]);
-    await saveRecord("toners", toner);
-    setEditingToner(null);
-    setPresetTonerModel(null);
-    setModal(null);
-    flash(exists ? "Toner SKU updated" : `Toner ${toner.tonerModel} added for ${toner.printerModel}`);
+    try {
+      await saveTonerRecord(toner);
+      setFallbackToners((rows) =>
+        rows.some((row) => row.id === toner.id)
+          ? rows.map((row) => (row.id === toner.id ? toner : row))
+          : [toner, ...rows],
+      );
+      setCollectionToners((rows) =>
+        rows.some((row) => row.id === toner.id)
+          ? rows.map((row) => (row.id === toner.id ? toner : row))
+          : rows,
+      );
+      setEditingToner(null);
+      setPresetTonerModel(null);
+      setModal(null);
+      flash(exists ? "Toner SKU updated" : `Toner ${toner.tonerModel} added for ${toner.printerModel}`);
+    } catch (err: unknown) {
+      console.error("Failed to save toner SKU:", err);
+      flash(err instanceof Error ? `Could not save toner: ${err.message}` : "Could not save toner to Firestore.");
+    }
   }
 
   async function deleteToner(toner: TonerStock) {
-    setToners((rows) => rows.filter((row) => row.id !== toner.id));
-    await removeRecord("toners", toner.id);
-    flash(`${toner.tonerModel} removed from toner stock`);
+    try {
+      await deleteTonerRecord(toner.id);
+      setCollectionToners((rows) => rows.filter((row) => row.id !== toner.id));
+      setFallbackToners((rows) => rows.filter((row) => row.id !== toner.id));
+      flash(`${toner.tonerModel} removed from toner stock`);
+    } catch (err: unknown) {
+      console.error("Failed to delete toner SKU:", err);
+      flash(err instanceof Error ? `Could not delete toner: ${err.message}` : "Could not delete toner from Firestore.");
+    }
   }
 
   async function deleteEmployee(employee: Employee) {
@@ -518,8 +585,13 @@ export default function Home() {
         }),
         printerMovement,
       );
-      setToners((rows) => rows.map((row) => (row.id === updatedToner.id ? updatedToner : row)));
-      setTonerTransactions((rows) => [transaction, ...rows]);
+      setCollectionToners((rows) => rows.map((row) => (row.id === updatedToner.id ? updatedToner : row)));
+      setFallbackToners((rows) =>
+        rows.some((row) => row.id === updatedToner.id)
+          ? rows.map((row) => (row.id === updatedToner.id ? updatedToner : row))
+          : [updatedToner, ...rows],
+      );
+      setFallbackTonerTxs((rows) => [transaction, ...rows.filter((row) => row.id !== transaction.id)]);
       if (movement) {
         setMovements((rows) => [movement, ...rows]);
       }
@@ -537,18 +609,18 @@ export default function Home() {
     }
   }
 
-  async function updateAsset(asset: Asset) {
-    setAssets((rows) => rows.map((row) => (row.id === asset.id ? asset : row)));
-    await saveRecord("assets", asset);
-  }
-
   async function deleteAsset(asset: Asset) {
-    const relatedMovements = movements.filter((movement) => movement.assetId === asset.id);
-    await deleteAssetRecord(asset.id, relatedMovements.map((movement) => movement.id));
-    setAssets((rows) => rows.filter((row) => row.id !== asset.id));
-    setMovements((rows) => rows.filter((movement) => movement.assetId !== asset.id));
-    setSelectedAsset(null);
-    flash(`${asset.name} deleted from inventory`);
+    try {
+      const relatedMovements = movements.filter((movement) => movement.assetId === asset.id);
+      await deleteAssetRecord(asset.id, relatedMovements.map((movement) => movement.id));
+      setAssets((rows) => rows.filter((row) => row.id !== asset.id));
+      setMovements((rows) => rows.filter((movement) => movement.assetId !== asset.id));
+      setSelectedAsset(null);
+      flash(`${asset.name} deleted from inventory`);
+    } catch (err: unknown) {
+      console.error("Failed to delete asset:", err);
+      flash(err instanceof Error ? `Could not delete asset: ${err.message}` : "Could not delete asset.");
+    }
   }
 
   async function applyAssetMovementBatch(
@@ -581,16 +653,23 @@ export default function Home() {
     const movementIds = new Set(movements.filter((movement) => movement.department === targetDepartment || employeeIds.has(movement.employeeId) || assetIds.has(movement.assetId)).map((movement) => movement.id));
     const requestIds = new Set(requests.filter((request) => request.department === targetDepartment).map((request) => request.id));
 
-    for (const assetId of assetIds) {
-      const history = await listRecords<{ id: string }>(`assets/${assetId}/history`);
-      await Promise.all(history.map((event) => removeRecord(`assets/${assetId}/history`, event.id)));
+    const pathsToDelete: [string, string, ...string[]][] = [];
+    const historyLists = await Promise.all(
+      Array.from(assetIds, async (assetId) => ({
+        assetId,
+        events: await listRecords<{ id: string }>(`assets/${assetId}/history`),
+      })),
+    );
+    for (const { assetId, events } of historyLists) {
+      for (const event of events) {
+        pathsToDelete.push(["assets", assetId, "history", event.id]);
+      }
     }
-    await Promise.all([
-      ...Array.from(movementIds, (id) => removeRecord("movements", id)),
-      ...Array.from(requestIds, (id) => removeRecord("requirements", id)),
-      ...Array.from(employeeIds, (id) => removeRecord("employees", id)),
-      ...Array.from(assetIds, (id) => removeRecord("assets", id)),
-    ]);
+    movementIds.forEach((id) => pathsToDelete.push(["movements", id]));
+    requestIds.forEach((id) => pathsToDelete.push(["requirements", id]));
+    employeeIds.forEach((id) => pathsToDelete.push(["employees", id]));
+    assetIds.forEach((id) => pathsToDelete.push(["assets", id]));
+    await deleteRecordsBatch(pathsToDelete);
 
     const nextDepartments = departments.filter((department) => department !== targetDepartment);
     const nextWindow = { ...requirementWindow, departments: nextDepartments };
@@ -935,7 +1014,7 @@ export default function Home() {
             <EmployeesView
               employees={filteredEmployees}
               allEmployees={employees}
-              assets={assets}
+              assetsByEmployeeId={assetsByEmployeeId}
               department={department}
               setDepartment={setDepartment}
               departments={departments}
@@ -971,6 +1050,9 @@ export default function Home() {
                   mouses: () => buildStaffMousesReport(assets, employeeMap),
                   employeeIt: () => buildEmployeeItAssetsReport(assets, employees, employeeMap),
                   printersToners: () => buildPrinterAndTonerReport(assets, toners, tonerTransactions, employeeMap),
+                  projectors: () => buildProjectorsReport(assets),
+                  chromecasts: () => buildChromecastsReport(assets),
+                  mobilePhones: () => buildMobilePhonesReport(assets, employeeMap),
                 } as const;
                 const { sheets, filename } = reportMap[reportId]();
                 await downloadStyledWorkbook(sheets, filename);
@@ -991,10 +1073,20 @@ export default function Home() {
           onClose={() => setSelectedAsset(null)}
           onEdit={() => { setEditingAsset(selectedAsset); setPresetAssetType(undefined); setSelectedAsset(null); setModal("asset"); }}
           onToggleVerified={async () => {
-            const nextAsset: Asset = { ...selectedAsset, verified: !selectedAsset.verified, updatedAt: today() };
+            const nextVerified = !selectedAsset.verified;
+            const updatedAt = today();
+            const nextAsset: Asset = { ...selectedAsset, verified: nextVerified, updatedAt };
             setSelectedAsset(nextAsset);
-            await updateAsset(nextAsset);
-            flash(nextAsset.verified ? `${nextAsset.name} marked as Verified (Yes)` : `${nextAsset.name} marked as Not Verified (No)`);
+            setAssets((rows) => rows.map((row) => (row.id === nextAsset.id ? nextAsset : row)));
+            try {
+              await updateRecord("assets", nextAsset.id, { verified: nextVerified, updatedAt });
+              flash(nextAsset.verified ? `${nextAsset.name} marked as Verified (Yes)` : `${nextAsset.name} marked as Not Verified (No)`);
+            } catch (err) {
+              console.error("Verify toggle failed:", err);
+              setSelectedAsset(selectedAsset);
+              setAssets((rows) => rows.map((row) => (row.id === selectedAsset.id ? selectedAsset : row)));
+              flash("Could not update verification status. Please try again.");
+            }
           }}
           onDelete={() => { if (window.confirm(`Delete ${selectedAsset.name} (${selectedAsset.code}) and its lifecycle history? This cannot be undone.`)) void deleteAsset(selectedAsset); }}
           onAddToner={(preset) => { setSelectedAsset(null); setEditingToner(null); setPresetTonerModel(preset); setModal("toner"); }}
@@ -1763,7 +1855,7 @@ function AssetsView({
 function EmployeesView({
   employees,
   allEmployees,
-  assets,
+  assetsByEmployeeId,
   department,
   setDepartment,
   departments,
@@ -1775,7 +1867,7 @@ function EmployeesView({
 }: {
   employees: Employee[];
   allEmployees: Employee[];
-  assets: Asset[];
+  assetsByEmployeeId: Record<string, Asset[]>;
   department: string;
   setDepartment: (value: string) => void;
   departments: string[];
@@ -1798,8 +1890,8 @@ function EmployeesView({
       .filter((group) => group.length > 1)
       .map((group) => {
         const sorted = [...group].sort((a, b) => {
-          const aCount = assets.filter((asset) => asset.employeeId === a.id).length;
-          const bCount = assets.filter((asset) => asset.employeeId === b.id).length;
+          const aCount = (assetsByEmployeeId[a.id] ?? []).length;
+          const bCount = (assetsByEmployeeId[b.id] ?? []).length;
           if (bCount !== aCount) return bCount - aCount;
           if (a.status === "Active" && b.status !== "Active") return -1;
           if (b.status === "Active" && a.status !== "Active") return 1;
@@ -1807,7 +1899,7 @@ function EmployeesView({
         });
         return sorted;
       });
-  }, [allEmployees, assets]);
+  }, [allEmployees, assetsByEmployeeId]);
 
   const duplicateEmployeeIds = useMemo(
     () => new Set(duplicateGroups.flat().map((emp) => emp.id)),
@@ -1851,7 +1943,7 @@ function EmployeesView({
                   </div>
                   <div className="duplicate-records-grid">
                     {group.map((entry, idx) => {
-                      const entryOwned = assets.filter((asset) => asset.employeeId === entry.id).length;
+                      const entryOwned = (assetsByEmployeeId[entry.id] ?? []).length;
                       return (
                         <div className="duplicate-record-chip" key={entry.id}>
                           <div>
@@ -1881,7 +1973,7 @@ function EmployeesView({
       <div className="select-row"><label>Department<select value={department} onChange={(event) => setDepartment(event.target.value)}><option>All</option>{departments.map((item) => <option key={item}>{item}</option>)}</select></label><span>{employees.length} employee{employees.length === 1 ? "" : "s"} shown</span></div>
       <div className="employee-grid">
         {employees.map((employee) => {
-          const owned = assets.filter((asset) => asset.employeeId === employee.id);
+          const owned = assetsByEmployeeId[employee.id] ?? [];
           const isDuplicate = duplicateEmployeeIds.has(employee.id);
           return (
             <article className={isDuplicate ? "employee-card employee-card-duplicate" : "employee-card"} key={employee.id}>
@@ -1953,13 +2045,22 @@ function RequirementsView({ requests, setRequests, windowConfig, setWindowConfig
       <div className="requirement-admin-actions"><button className="button button-secondary" onClick={onAdd}><Plus size={16} />Add on behalf of department</button><button className="button button-secondary" onClick={async () => { const next = { ...windowConfig, isOpen: !windowConfig.isOpen }; setWindowConfig(next); await saveRequirementWindow(next); }}>{windowConfig.isOpen ? <X size={16} /> : <Check size={16} />}{windowConfig.isOpen ? "Close form now" : "Open form now"}</button><span>Shareable URL: <code>{formUrl}</code></span></div>
       <section className="panel table-panel">
         <div className="table-toolbar"><div><strong>Submitted requirements</strong><small>{requests.reduce((sum, row) => sum + row.quantity, 0)} total items requested</small></div><span className="audit-badge">{requests.length} submissions</span></div>
-        <div className="responsive-table"><table><thead><tr><th>Department</th><th>Requirement</th><th>Qty</th><th>Needed by</th><th>Reason</th><th>Status</th></tr></thead><tbody>{requests.map((request) => <tr key={request.id}><td><strong>{request.department}</strong></td><td>{request.item}</td><td><span className="qty">{request.quantity}</span></td><td>{new Date(request.neededDate).toLocaleDateString("en-GB")}</td><td className="reason-cell">{request.reason}</td><td><select className={statusClass(request.status)} value={request.status} onChange={async (event) => { const next = { ...request, status: event.target.value as RequestRow["status"] }; setRequests((rows) => rows.map((row) => row.id === request.id ? next : row)); await saveRecord("requirements", next); }}><option>Pending</option><option>Approved</option><option>Declined</option></select></td></tr>)}</tbody></table></div>
+        <div className="responsive-table"><table><thead><tr><th>Department</th><th>Requirement</th><th>Qty</th><th>Needed by</th><th>Reason</th><th>Status</th></tr></thead><tbody>{requests.map((request) => <tr key={request.id}><td><strong>{request.department}</strong></td><td>{request.item}</td><td><span className="qty">{request.quantity}</span></td><td>{new Date(request.neededDate).toLocaleDateString("en-GB")}</td><td className="reason-cell">{request.reason}</td><td><select className={statusClass(request.status)} value={request.status} onChange={async (event) => { const nextStatus = event.target.value as RequestRow["status"]; const next = { ...request, status: nextStatus }; setRequests((rows) => rows.map((row) => row.id === request.id ? next : row)); try { await updateRecord("requirements", request.id, { status: nextStatus }); } catch { setRequests((rows) => rows.map((row) => row.id === request.id ? request : row)); onFlash("Could not update requirement status."); } }}><option>Pending</option><option>Approved</option><option>Declined</option></select></td></tr>)}</tbody></table></div>
       </section>
     </>
   );
 }
 
-type StructuredReportId = "laptops" | "monitors" | "headsets" | "mouses" | "employeeIt" | "printersToners";
+type StructuredReportId =
+  | "laptops"
+  | "monitors"
+  | "headsets"
+  | "mouses"
+  | "employeeIt"
+  | "printersToners"
+  | "projectors"
+  | "chromecasts"
+  | "mobilePhones";
 
 function ReportsView({
   assets,
@@ -1994,6 +2095,9 @@ function ReportsView({
   const mouseCount = assets.filter((a) => a.type === "Mouse").length;
   const itAssignedCount = assets.filter((a) => a.category === "IT Asset" && Boolean(a.employeeId && employeeMap[a.employeeId])).length;
   const printerCount = assets.filter((a) => a.type === "Printer").length;
+  const projectorCount = assets.filter((a) => a.type === "Projector").length;
+  const chromecastCount = assets.filter((a) => a.type === "Google Chromecast").length;
+  const mobilePhoneCount = assets.filter((a) => a.type === "Mobile Phone").length;
   const tonerUnits = toners.reduce((sum, t) => sum + t.quantity, 0);
 
   const structuredReports: {
@@ -2065,6 +2169,36 @@ function ReportsView({
       copy: "3 formatted sheets: Printers Register (A–Z Dept), Toner Stock by Printer Model, and Issue/Restock History.",
       columns: "Department · Assigned To · Printer Model · Serial · Compatible Toner · Stock Balance · History",
       tone: "slate",
+    },
+    {
+      id: "projectors",
+      badge: "REPORT 07",
+      icon: Projector,
+      title: "All Projectors",
+      count: `${projectorCount} projector${projectorCount === 1 ? "" : "s"}`,
+      copy: "Sorted A–Z by Building & Classroom with mount type, input connection, resolution, condition & Location Summary.",
+      columns: "Building · Classroom / Location · Asset Name · Brand · Model · Serial · Mount · Status · Condition · Verified",
+      tone: "violet",
+    },
+    {
+      id: "chromecasts",
+      badge: "REPORT 08",
+      icon: Cast,
+      title: "All Google Chromecasts",
+      count: `${chromecastCount} chromecast${chromecastCount === 1 ? "" : "s"}`,
+      copy: "Sorted A–Z by Building & Classroom with Chromecast generation, resolution, remote, condition & Location Summary.",
+      columns: "Building · Classroom / Location · Asset Name · Model · Serial · Generation · Connectivity · Remote · Verified",
+      tone: "blue",
+    },
+    {
+      id: "mobilePhones",
+      badge: "REPORT 09",
+      icon: Smartphone,
+      title: "All Mobile Phones",
+      count: `${mobilePhoneCount} phone${mobilePhoneCount === 1 ? "" : "s"}`,
+      copy: "Sorted A–Z by Department with Emp No, Name, IMEI number, RAM, storage, condition & Department Summary.",
+      columns: "Emp No · Name · Department · Asset Name · Brand · Model · Serial · IMEI · RAM · Storage · Verified",
+      tone: "green",
     },
   ];
 
