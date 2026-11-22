@@ -213,8 +213,8 @@ export const ASSET_SPEC_FIELDS: Record<string, AssetSpecField[]> = {
     { key: "phoneNumber", label: "Phone number", placeholder: "e.g. 0771234567" },
   ],
   "Mobile Phone": [
-    { key: "ram", label: "RAM size", options: ["2 GB", "3 GB", "4 GB", "6 GB", "8 GB", "12 GB", "16 GB"] },
-    { key: "storageSize", label: "Storage capacity", options: ["32 GB", "64 GB", "128 GB", "256 GB", "512 GB", "1 TB"] },
+    { key: "ram", label: "RAM size", options: ["Optional", "2 GB", "3 GB", "4 GB", "6 GB", "8 GB", "12 GB", "16 GB"], required: false },
+    { key: "storageSize", label: "Storage capacity", options: ["Optional", "32 GB", "64 GB", "128 GB", "256 GB", "512 GB", "1 TB"], required: false },
     { key: "imei", label: "IMEI number", placeholder: "Enter device IMEI" },
   ],
   "Laptop Bag": [

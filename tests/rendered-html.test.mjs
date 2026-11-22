@@ -70,6 +70,8 @@ test("supports custom departments, employee editing and type-specific asset fiel
   assert.match(page, /Employee details updated/i);
   assert.match(catalog, /RAM size/);
   assert.match(catalog, /"20 GB"/);
+  assert.match(catalog, /"Mobile Phone": \[\s*\{ key: "ram", label: "RAM size", options: \["Optional"/);
+  assert.match(catalog, /\{ key: "storageSize", label: "Storage capacity", options: \["Optional"/);
   assert.match(catalog, /Storage capacity/);
   assert.match(catalog, /Processor/);
   assert.match(catalog, /Wired USB/);
